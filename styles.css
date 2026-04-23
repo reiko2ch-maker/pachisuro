@@ -862,3 +862,146 @@ h1 {
     font-size: 13px;
   }
 }
+
+
+/* cinematic layer */
+.reel-frame { position: relative; isolation: isolate; }
+.cinematic-stage { position: absolute; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; border-radius: 22px; }
+.bg-video, .cutin-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .35s ease; }
+.bg-video.visible, .cutin-video.visible { opacity: .44; }
+.cutin-video.visible { opacity: .88; z-index: 3; }
+.bg-video.hidden, .cutin-video.hidden { display: none; }
+.fx-vignette, .fx-flash, .fx-glitch, .fx-particles { position: absolute; inset: 0; }
+.fx-vignette { background: radial-gradient(circle at center, transparent 35%, rgba(0,0,0,.36) 80%, rgba(0,0,0,.65) 100%); z-index: 1; }
+.fx-flash { z-index: 4; opacity: 0; background: radial-gradient(circle at center, rgba(255,255,255,.84), rgba(255,77,184,.2) 35%, transparent 70%); }
+.fx-flash.active { animation: fxFlash .45s ease; }
+.fx-glitch { z-index: 4; opacity: 0; background: repeating-linear-gradient(180deg, rgba(255,255,255,.08) 0 2px, rgba(0,0,0,0) 2px 4px); mix-blend-mode: screen; }
+.fx-glitch.active { animation: fxGlitch .5s steps(4); }
+.fx-particles { z-index: 2; opacity: .3; background-image: radial-gradient(circle at 15% 25%, rgba(255,255,255,.25) 0 1px, transparent 2px), radial-gradient(circle at 80% 20%, rgba(186,140,255,.45) 0 1px, transparent 2px), radial-gradient(circle at 30% 80%, rgba(255,77,184,.35) 0 1px, transparent 2px), radial-gradient(circle at 70% 70%, rgba(247,201,110,.28) 0 1px, transparent 2px); animation: floatParticles 8s linear infinite; }
+.machine-glow.anger { box-shadow: 0 0 0 1px rgba(255,90,116,.45), 0 0 50px rgba(255,90,116,.28), inset 0 0 60px rgba(255,90,116,.14); }
+.machine-glow.purple { box-shadow: 0 0 0 1px rgba(186,140,255,.45), 0 0 50px rgba(186,140,255,.28), inset 0 0 60px rgba(186,140,255,.16); }
+.machine-glow.gold { box-shadow: 0 0 0 1px rgba(247,201,110,.45), 0 0 60px rgba(247,201,110,.3), inset 0 0 70px rgba(247,201,110,.16); }
+.screen-overlay { z-index: 2; backdrop-filter: saturate(1.04); }
+.home-note { margin-top: 8px; color: var(--muted); line-height: 1.6; font-size: 13px; }
+@keyframes fxFlash { 0%{opacity:0;} 15%{opacity:.95;} 100%{opacity:0;} }
+@keyframes fxGlitch { 0%{opacity:0; transform:translateX(0);} 20%{opacity:.6; transform:translateX(-4px);} 40%{opacity:.3; transform:translateX(4px);} 60%{opacity:.75; transform:translateX(-2px);} 100%{opacity:0; transform:translateX(0);} }
+@keyframes floatParticles { 0%{transform:translateY(0);} 50%{transform:translateY(-10px);} 100%{transform:translateY(0);} }
+@media (max-width: 900px){ .bg-video.visible { opacity: .36; } .cutin-video.visible { opacity: .82; } }
+
+
+/* ultimate lcd */
+.lcd-shell {
+  margin: 18px 0 18px;
+  padding: 14px;
+  border: 1px solid rgba(161, 135, 255, 0.22);
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(13, 10, 28, 0.92), rgba(10, 7, 20, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 16px 32px rgba(0,0,0,0.26);
+}
+.lcd-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.lcd-eyebrow {
+  margin: 0 0 4px;
+  color: var(--gold);
+  letter-spacing: .2em;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.lcd-badge {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(186, 140, 255, 0.16);
+  border: 1px solid rgba(186, 140, 255, 0.24);
+  color: #fff;
+  font-size: 12px;
+  letter-spacing: .08em;
+  font-family: "Orbitron", sans-serif;
+}
+.lcd-frame {
+  position: relative;
+  aspect-ratio: 16 / 6.6;
+  min-height: 160px;
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: radial-gradient(circle at 20% 20%, rgba(186,140,255,.26), transparent 28%), linear-gradient(135deg, #0b0917 0%, #121022 55%, #090711 100%);
+}
+.lcd-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: .98;
+  z-index: 1;
+  transition: opacity .3s ease;
+}
+.lcd-video.hidden { display: none; }
+.lcd-fallback-art,
+.lcd-scanline,
+.lcd-noise,
+.lcd-copy { position: absolute; inset: 0; }
+.lcd-fallback-art {
+  z-index: 0;
+  background:
+    radial-gradient(circle at 18% 24%, rgba(255,255,255,.09) 0 2px, transparent 3px),
+    radial-gradient(circle at 74% 26%, rgba(255,77,184,.24) 0 3px, transparent 5px),
+    radial-gradient(circle at 34% 70%, rgba(186,140,255,.28) 0 4px, transparent 6px),
+    linear-gradient(120deg, rgba(255,255,255,0.05), transparent 28%),
+    linear-gradient(135deg, rgba(130, 47, 71, .36), rgba(18, 12, 33, .5) 45%, rgba(8, 7, 18, .95));
+  transform: scale(1.04);
+  animation: lcdPulse 5.4s ease-in-out infinite;
+}
+.lcd-scanline {
+  z-index: 2;
+  background: repeating-linear-gradient(180deg, rgba(255,255,255,.045) 0 2px, rgba(0,0,0,0) 2px 4px);
+  mix-blend-mode: screen;
+  opacity: .28;
+  pointer-events: none;
+}
+.lcd-noise {
+  z-index: 2;
+  background: radial-gradient(circle at 10% 20%, rgba(255,255,255,.05), transparent 28%), radial-gradient(circle at 80% 70%, rgba(255,255,255,.03), transparent 18%);
+  animation: lcdNoise .35s steps(2) infinite;
+  opacity: .36;
+}
+.lcd-copy {
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 18px;
+  background: linear-gradient(180deg, transparent 20%, rgba(3, 2, 8, 0.1) 45%, rgba(3, 2, 8, 0.72) 100%);
+}
+.lcd-copy p {
+  max-width: 82%;
+  line-height: 1.55;
+  color: rgba(245, 241, 255, .92);
+  text-shadow: 0 2px 12px rgba(0,0,0,.42);
+}
+.lcd-frame.theme-normal { box-shadow: inset 0 0 36px rgba(186,140,255,.12), 0 0 26px rgba(186,140,255,.08); }
+.lcd-frame.theme-kakugan { box-shadow: inset 0 0 38px rgba(255,90,116,.18), 0 0 26px rgba(255,90,116,.12); }
+.lcd-frame.theme-cz,
+.lcd-frame.theme-battle { box-shadow: inset 0 0 42px rgba(255,90,116,.2), 0 0 28px rgba(255,90,116,.14); }
+.lcd-frame.theme-bonus,
+.lcd-frame.theme-upper,
+.lcd-frame.theme-frenzy { box-shadow: inset 0 0 46px rgba(247,201,110,.18), 0 0 28px rgba(247,201,110,.14); }
+.lcd-frame.theme-at { box-shadow: inset 0 0 40px rgba(186,140,255,.2), 0 0 26px rgba(186,140,255,.12); }
+.lcd-frame.flash { animation: lcdFlash .5s ease; }
+@keyframes lcdPulse { 0%,100% { transform: scale(1.03); filter: saturate(1); } 50% { transform: scale(1.08); filter: saturate(1.18); } }
+@keyframes lcdNoise { 0% { transform: translate(0,0);} 50% { transform: translate(2px,-1px);} 100% { transform: translate(-1px,1px);} }
+@keyframes lcdFlash { 0%{filter: brightness(1);} 15%{filter: brightness(2.2);} 100%{filter: brightness(1);} }
+@media (max-width: 900px) {
+  .lcd-shell { margin: 14px 0; padding: 12px; }
+  .lcd-frame { min-height: 132px; }
+  .lcd-copy { padding: 14px; }
+  .lcd-copy p { max-width: 92%; font-size: 13px; }
+  .lcd-badge { padding: 7px 10px; font-size: 11px; }
+}

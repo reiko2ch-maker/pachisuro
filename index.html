@@ -39,7 +39,34 @@
           </div>
         </div>
 
+        <section class="lcd-shell">
+          <div class="lcd-header">
+            <div>
+              <p class="lcd-eyebrow">LIQUID CRYSTAL CINEMATIC DISPLAY</p>
+              <h3 id="lcd-title">STANDBY MODE</h3>
+            </div>
+            <span id="lcd-badge" class="lcd-badge">NORMAL</span>
+          </div>
+          <div id="lcd-frame" class="lcd-frame theme-normal">
+            <video id="lcd-video" class="lcd-video hidden" playsinline muted preload="metadata"></video>
+            <div class="lcd-fallback-art"></div>
+            <div class="lcd-scanline"></div>
+            <div class="lcd-noise"></div>
+            <div class="lcd-copy">
+              <p id="lcd-subtitle">映像アセット未配置時は液晶演出に自動フォールバック</p>
+            </div>
+          </div>
+        </section>
+
         <div class="reel-frame">
+          <div class="cinematic-stage" id="cinematic-stage">
+            <video id="bg-video" class="bg-video hidden" playsinline muted loop preload="metadata"></video>
+            <video id="cutin-video" class="cutin-video hidden" playsinline muted preload="metadata"></video>
+            <div id="fx-vignette" class="fx-vignette"></div>
+            <div id="fx-flash" class="fx-flash"></div>
+            <div id="fx-glitch" class="fx-glitch"></div>
+            <div id="fx-particles" class="fx-particles"></div>
+          </div>
           <div class="screen-overlay" id="screen-overlay">
             <div class="screen-copy">
               <p id="screen-small">STAND BY</p>
@@ -159,6 +186,7 @@
 
         <section class="home-block">
           <h3>保存管理</h3>
+          <p class="home-note">※ 映像は著作権的に、公式素材の同梱は不可。手持ちの権利クリア済み動画のみ差し替え対応。</p>
           <div class="home-actions vertical">
             <button id="manual-save" class="ghost-button">手動セーブ</button>
             <button id="manual-load" class="ghost-button">ロード</button>
@@ -176,6 +204,7 @@
             <li>設定1〜6、モード管理、天井、前兆、差枚管理</li>
             <li>自動セーブ、手動セーブ、ロード、GitHub Pages対応</li>
             <li>デバッグ表示とイベントログ</li>
+            <li>動画対応の演出レイヤー（ユーザー保有素材を assets/video に配置）</li>
           </ul>
         </section>
       </div>

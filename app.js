@@ -111,7 +111,18 @@ const dom = {
   resetSave: $("reset-save"),
   saveText: $("save-text"),
   toggleDebug: $("toggle-debug"),
-  reels: [$("reel-0"), $("reel-1"), $("reel-2")]
+  reels: [$("reel-0"), $("reel-1"), $("reel-2")],
+  bgVideo: $("bg-video"),
+  cutinVideo: $("cutin-video"),
+  fxFlash: $("fx-flash"),
+  fxGlitch: $("fx-glitch"),
+  cinematicStage: $("cinematic-stage"),
+  machineGlow: document.querySelector(".machine-glow"),
+  lcdFrame: $("lcd-frame"),
+  lcdVideo: $("lcd-video"),
+  lcdTitle: $("lcd-title"),
+  lcdSubtitle: $("lcd-subtitle"),
+  lcdBadge: $("lcd-badge")
 };
 
 const runtime = {
@@ -120,8 +131,202 @@ const runtime = {
   currentStopIndex: 0,
   intervals: [null, null, null],
   autoTimer: null,
-  reelViews: [[], [], []]
+  reelViews: [[], [], []],
+  fxTimer: null,
+  lcdLockUntil: 0,
+  lcdSceneKey: "NORMAL_IDLE",
+  lcdTimer: null
 };
+
+
+const CINEMATIC_SCENES = {
+  NORMAL: { tone: "purple", bg: "assets/video/normal-loop.webm", fallback: "shadow" },
+  PRELUDE: { tone: "anger", bg: "assets/video/prelude-loop.webm", fallback: "pulse" },
+  CZ: { tone: "anger", bg: "assets/video/cz-loop.webm", fallback: "scan" },
+  EP_BONUS: { tone: "gold", bg: "assets/video/bonus-loop.webm", fallback: "spark" },
+  AT: { tone: "purple", bg: "assets/video/at-loop.webm", fallback: "pulse" },
+  BATTLE: { tone: "anger", bg: "assets/video/battle-loop.webm", fallback: "scan" },
+  FRENZY: { tone: "gold", bg: "assets/video/frenzy-loop.webm", fallback: "spark" }
+};
+const CUTIN_ASSETS = {
+  kakugan: "assets/video/cutin-kakugan.webm",
+  cz: "assets/video/cutin-cz.webm",
+  ep: "assets/video/cutin-ep.webm",
+  at: "assets/video/cutin-at.webm",
+  battle: "assets/video/cutin-battle.webm",
+  frenzy: "assets/video/cutin-frenzy.webm",
+  upper: "assets/video/cutin-upper.webm",
+  through: "assets/video/cutin-through.webm"
+};
+const ASSET_EXTS = [".webm", ".mp4"];
+const LCD_SCENES = {
+  NORMAL_IDLE: { asset: "assets/video/lcd-normal-idle", badge: "NORMAL", theme: "theme-normal", title: "SHADOW DISTRICT", subtitle: "静寂の通常時。レア役・ゲーム数・前兆を監視。" },
+  NORMAL_KAKUGAN: { asset: "assets/video/lcd-kakugan", badge: "KAKUGAN", theme: "theme-kakugan", title: "SCARLET EYE", subtitle: "赫眼示唆。レア役密度上昇中。" },
+  PRELUDE_CZ: { asset: "assets/video/lcd-prelude-cz", badge: "PRELUDE", theme: "theme-cz", title: "BLOOD GATE PRELUDE", subtitle: "不穏な前兆。CZへ発展。" },
+  PRELUDE_EP: { asset: "assets/video/lcd-prelude-ep", badge: "PRELUDE", theme: "theme-bonus", title: "EPISODE PRELUDE", subtitle: "強い前兆。BONUSへ昇格の気配。" },
+  PRELUDE_AT: { asset: "assets/video/lcd-prelude-at", badge: "PRELUDE", theme: "theme-at", title: "RUSH PRELUDE", subtitle: "直AT前兆。液晶がざわつく。" },
+  CZ_IDLE: { asset: "assets/video/lcd-cz-idle", badge: "CZ", theme: "theme-cz", title: "BLOOD GATE", subtitle: "8Gで突破を狙う。演出煽りとレア役が鍵。" },
+  CZ_SUCCESS: { asset: "assets/video/lcd-cz-success", badge: "CZ SUCCESS", theme: "theme-bonus", title: "GATE BREAK", subtitle: "扉が開かれた。AT突入確定。" },
+  CZ_FAIL: { asset: "assets/video/lcd-cz-fail", badge: "CZ FAIL", theme: "theme-cz", title: "GATE CLOSED", subtitle: "失敗。ただし次の前兆に注意。" },
+  EP_START: { asset: "assets/video/lcd-ep-start", badge: "BONUS", theme: "theme-bonus", title: "ECLIPSE BONUS", subtitle: "当たり中。消化中の上乗せに期待。" },
+  AT_START: { asset: "assets/video/lcd-at-start", badge: "AT", theme: "theme-at", title: "DEVOUR RUSH", subtitle: "差枚AT開幕。対決と特化で伸ばせ。" },
+  AT_IDLE: { asset: "assets/video/lcd-at-idle", badge: "AT", theme: "theme-at", title: "RUSH STATE", subtitle: "対決ポイント蓄積中。" },
+  AT_UPPER: { asset: "assets/video/lcd-at-upper", badge: "UPPER", theme: "theme-upper", title: "CROWN ECLIPSE", subtitle: "上位AT滞在中。期待枚数上昇。" },
+  BATTLE_ENTRY: { asset: "assets/video/lcd-battle-entry", badge: "BATTLE", theme: "theme-battle", title: "ABYSS BATTLE", subtitle: "敵を撃破して大量上乗せを掴め。" },
+  BATTLE_WIN: { asset: "assets/video/lcd-battle-win", badge: "WIN", theme: "theme-upper", title: "BATTLE VICTORY", subtitle: "上乗せ・特化のチャンス。" },
+  BATTLE_LOSE: { asset: "assets/video/lcd-battle-lose", badge: "LOSE", theme: "theme-battle", title: "BATTLE LOST", subtitle: "敗北後もATは継続。" },
+  FRENZY_NIGHT_RAID: { asset: "assets/video/lcd-frenzy-night-raid", badge: "FRENZY", theme: "theme-frenzy", title: "NIGHT RAID", subtitle: "軽快に差枚を重ねる特化。" },
+  FRENZY_CENTIPEDE_RUSH: { asset: "assets/video/lcd-frenzy-centipede-rush", badge: "FRENZY", theme: "theme-frenzy", title: "CENTIPEDE RUSH", subtitle: "中位特化。強い連打に期待。" },
+  FRENZY_KING_EATER: { asset: "assets/video/lcd-frenzy-king-eater", badge: "FRENZY", theme: "theme-frenzy", title: "KING EATER", subtitle: "最上位の一撃特化。大台へ。" },
+  UPPER_ENTER: { asset: "assets/video/lcd-upper-enter", badge: "UPPER", theme: "theme-upper", title: "CROWN ECLIPSE AWAKEN", subtitle: "上位モード突入。暴走開始。" },
+  THROUGH_ENTER: { asset: "assets/video/lcd-through-enter", badge: "THROUGH", theme: "theme-upper", title: "THROUGH CHANCE", subtitle: "貫きストック獲得。次回上位優遇。" },
+  AT_END: { asset: "assets/video/lcd-at-end", badge: "ENDING", theme: "theme-normal", title: "RUSH END", subtitle: "静寂へ戻る。次の当たりを狙え。" },
+  RARE_CHERRY: { asset: "assets/video/lcd-rare-cherry", badge: "RARE", theme: "theme-kakugan", title: "CHERRY", subtitle: "小役成立。前兆とポイント加算に期待。" },
+  RARE_MOON: { asset: "assets/video/lcd-rare-moon", badge: "RARE", theme: "theme-at", title: "MOON", subtitle: "やや強めのレア役。発展期待度アップ。" },
+  RARE_CHANCE: { asset: "assets/video/lcd-rare-chance", badge: "RARE", theme: "theme-cz", title: "CHANCE PATTERN", subtitle: "チャンス目。CZ・AT直撃に期待。" },
+  RARE_CRUSH: { asset: "assets/video/lcd-rare-crush", badge: "RARE", theme: "theme-upper", title: "CRUSH", subtitle: "強レア役。大きな展開の起点。" }
+};
+function normalizeAssetBase(path) {
+  if (!path) return null;
+  return path.replace(/\.(webm|mp4)$/i, "");
+}
+function loadVideoAsset(el, assetBase, { loop = false, showClass = "visible" } = {}) {
+  if (!el) return;
+  const normalized = normalizeAssetBase(assetBase);
+  if (!normalized) {
+    el.pause();
+    el.removeAttribute("src");
+    el.dataset.base = "";
+    el.classList.add("hidden");
+    el.classList.remove(showClass);
+    el.load();
+    return;
+  }
+  let idx = 0;
+  const tryLoad = () => {
+    const src = `${normalized}${ASSET_EXTS[idx]}`;
+    el.dataset.base = normalized;
+    el.loop = loop;
+    el.src = src;
+    el.classList.remove("hidden");
+    el.classList.add(showClass);
+    el.onloadedmetadata = () => safePlayVideo(el);
+    el.onerror = () => {
+      idx += 1;
+      if (idx < ASSET_EXTS.length) {
+        tryLoad();
+      } else {
+        el.pause();
+        el.classList.add("hidden");
+        el.classList.remove(showClass);
+      }
+    };
+  };
+  if (el.dataset.base === normalized) {
+    el.classList.remove("hidden");
+    el.classList.add(showClass);
+    safePlayVideo(el);
+    return;
+  }
+  tryLoad();
+}
+function setBgVideo(src) {
+  loadVideoAsset(dom.bgVideo, src, { loop: true, showClass: "visible" });
+}
+function flashLcd() {
+  if (!dom.lcdFrame) return;
+  dom.lcdFrame.classList.remove("flash");
+  void dom.lcdFrame.offsetWidth;
+  dom.lcdFrame.classList.add("flash");
+}
+function applyLcdScene(sceneKey, overrides = {}) {
+  const scene = { ...(LCD_SCENES[sceneKey] || LCD_SCENES.NORMAL_IDLE), ...overrides };
+  runtime.lcdSceneKey = sceneKey;
+  if (dom.lcdTitle) dom.lcdTitle.textContent = scene.title || "STANDBY MODE";
+  if (dom.lcdSubtitle) dom.lcdSubtitle.textContent = scene.subtitle || "";
+  if (dom.lcdBadge) dom.lcdBadge.textContent = scene.badge || "NORMAL";
+  if (dom.lcdFrame) {
+    dom.lcdFrame.classList.remove("theme-normal", "theme-kakugan", "theme-cz", "theme-bonus", "theme-at", "theme-upper", "theme-battle", "theme-frenzy");
+    dom.lcdFrame.classList.add(scene.theme || "theme-normal");
+  }
+  loadVideoAsset(dom.lcdVideo, scene.asset, { loop: !!scene.loop, showClass: "visible" });
+  if (scene.flash !== false) flashLcd();
+}
+function schedulePersistentLcd(delay = 0) {
+  clearTimeout(runtime.lcdTimer);
+  runtime.lcdTimer = setTimeout(() => {
+    runtime.lcdLockUntil = 0;
+    updatePersistentLCD();
+  }, delay);
+}
+function playLcdScene(sceneKey, options = {}) {
+  const duration = options.duration ?? 1400;
+  runtime.lcdLockUntil = Date.now() + duration;
+  applyLcdScene(sceneKey, options);
+  schedulePersistentLcd(duration + 50);
+}
+function updatePersistentLCD() {
+  if (Date.now() < runtime.lcdLockUntil) return;
+  let key = "NORMAL_IDLE";
+  if (state.phase === "NORMAL") key = state.kakuganRemain > 0 ? "NORMAL_KAKUGAN" : "NORMAL_IDLE";
+  else if (state.phase === "PRELUDE") key = state.preludeKind === "CZ" ? "PRELUDE_CZ" : state.preludeKind === "EP" ? "PRELUDE_EP" : "PRELUDE_AT";
+  else if (state.phase === "CZ") key = "CZ_IDLE";
+  else if (state.phase === "EP_BONUS") key = "EP_START";
+  else if (state.phase === "AT") key = state.upperMode ? "AT_UPPER" : "AT_IDLE";
+  else if (state.phase === "BATTLE") key = "BATTLE_ENTRY";
+  else if (state.phase === "FRENZY") {
+    if (state.frenzyType === "NIGHT_RAID") key = "FRENZY_NIGHT_RAID";
+    else if (state.frenzyType === "CENTIPEDE_RUSH") key = "FRENZY_CENTIPEDE_RUSH";
+    else key = "FRENZY_KING_EATER";
+  }
+  applyLcdScene(key, { flash: false, loop: true });
+}
+function maybePlayRareScene(role) {
+  const map = { cherry: "RARE_CHERRY", moon: "RARE_MOON", chance: "RARE_CHANCE", crush: "RARE_CRUSH" };
+  const key = map[role.key];
+  if (!key) return;
+  if (["PRELUDE", "CZ", "EP_BONUS"].includes(state.phase)) return;
+  playLcdScene(key, { duration: role.key === "crush" ? 1650 : 900, loop: false });
+}
+
+function safePlayVideo(el) {
+  if (!el) return;
+  const p = el.play();
+  if (p && typeof p.catch === "function") p.catch(() => {});
+}
+
+function triggerFx(kind = "flash") {
+  const target = kind === "glitch" ? dom.fxGlitch : dom.fxFlash;
+  if (!target) return;
+  target.classList.remove("active");
+  void target.offsetWidth;
+  target.classList.add("active");
+}
+
+function playCutin(key) {
+  const src = CUTIN_ASSETS[key];
+  if (!dom.cutinVideo || !src) {
+    triggerFx(key === "upper" || key === "through" ? "glitch" : "flash");
+    return;
+  }
+  loadVideoAsset(dom.cutinVideo, src, { loop: false, showClass: "visible" });
+  clearTimeout(runtime.fxTimer);
+  runtime.fxTimer = setTimeout(() => {
+    if (!dom.cutinVideo) return;
+    dom.cutinVideo.pause();
+    dom.cutinVideo.classList.add("hidden");
+    dom.cutinVideo.classList.remove("visible");
+  }, 1700);
+}
+
+function updateCinematicByPhase() {
+  const scene = CINEMATIC_SCENES[state.phase] || CINEMATIC_SCENES.NORMAL;
+  if (dom.machineGlow) {
+    dom.machineGlow.classList.remove("anger", "purple", "gold");
+    dom.machineGlow.classList.add(scene.tone);
+  }
+  setBgVideo(scene.bg);
+}
 
 function createInitialState(setting = 1) {
   const state = {
@@ -364,6 +569,7 @@ function finalizeSpin() {
   }
 
   state.credits += payout;
+  maybePlayRareScene(outcome.role);
   maybeExpireKakugan();
   autoSave();
   render();
@@ -387,6 +593,8 @@ function enterKakugan(extra = null) {
   const length = extra || weightedPick({ 10: 70, 20: 20, 30: 8, 50: 2 });
   state.kakuganRemain = Math.max(state.kakuganRemain, Number(length));
   makeLog(`赫眼突入 ${length}G。レア役密度が上昇。`, "highlight");
+  playCutin("kakugan");
+  playLcdScene("NORMAL_KAKUGAN", { duration: 1400, loop: false });
 }
 
 function startPrelude(kind, games = 3) {
@@ -395,6 +603,8 @@ function startPrelude(kind, games = 3) {
   state.preludeGames = games;
   const label = kind === "CZ" ? "BLOOD GATE" : kind === "EP" ? "ECLIPSE BONUS" : "DEVOUR RUSH";
   makeLog(`${label} 前兆開始。`, "highlight");
+  triggerFx(kind === "CZ" ? "glitch" : "flash");
+  playLcdScene(kind === "CZ" ? "PRELUDE_CZ" : kind === "EP" ? "PRELUDE_EP" : "PRELUDE_AT", { duration: 1200, loop: false });
 }
 
 function enterCz(initialRate = 28) {
@@ -406,6 +616,8 @@ function enterCz(initialRate = 28) {
   state.czForceSuccess = false;
   state.czCount += 1;
   makeLog(`CZ「BLOOD GATE」突入。成功期待度 ${state.czSuccessRate.toFixed(0)}%`, "highlight");
+  playCutin("cz");
+  playLcdScene("CZ_IDLE", { duration: 1400, loop: false });
 }
 
 function enterEpBonus() {
@@ -416,6 +628,8 @@ function enterEpBonus() {
   state.epBonusAdd = 0;
   state.epCount += 1;
   makeLog("ECLIPSE BONUS突入。消化後AT確定。", "highlight");
+  playCutin("ep");
+  playLcdScene("EP_START", { duration: 1600, loop: false });
 }
 
 function startAT(base, reason = "") {
@@ -446,9 +660,13 @@ function startAT(base, reason = "") {
     if (state.throughStock > 0) state.throughStock -= 1;
     state.upperSeed = false;
     makeLog("貫き発動。上位ATを引き継いで再突入。", "win");
+    playCutin("through");
+    playLcdScene("THROUGH_ENTER", { duration: 1800, loop: false });
   }
 
   makeLog(`AT「DEVOUR RUSH」開始 +${base}枚${reason ? ` / ${reason}` : ""}`, "win");
+  playCutin("at");
+  playLcdScene(state.upperMode ? "AT_UPPER" : "AT_START", { duration: 1700, loop: false });
 }
 
 function startBattle() {
@@ -459,6 +677,8 @@ function startBattle() {
   const enemyIndex = Number(weightedPick(weighted));
   state.battleEnemy = ENEMIES[enemyIndex];
   makeLog(`対決開始: ${state.battleEnemy.name}`, "highlight");
+  playCutin("battle");
+  playLcdScene("BATTLE_ENTRY", { duration: 1600, loop: false, title: `ABYSS BATTLE / ${state.battleEnemy.name}`, subtitle: "敵を撃破して報酬を掴め。" });
 }
 
 function startFrenzy(typeKey) {
@@ -467,6 +687,8 @@ function startFrenzy(typeKey) {
   state.frenzyType = typeKey;
   state.frenzyGamesLeft = frenzy.games[randInt(0, frenzy.games.length - 1)];
   makeLog(`${frenzy.label} 突入。${state.frenzyGamesLeft}G継続。`, "win");
+  playCutin("frenzy");
+  playLcdScene(typeKey === "NIGHT_RAID" ? "FRENZY_NIGHT_RAID" : typeKey === "CENTIPEDE_RUSH" ? "FRENZY_CENTIPEDE_RUSH" : "FRENZY_KING_EATER", { duration: 1800, loop: false });
 }
 
 function enterUpperMode(reason = "") {
@@ -475,6 +697,8 @@ function enterUpperMode(reason = "") {
   state.upperMeter = 0;
   state.atRemain += 180;
   makeLog(`上位モード「CROWN ECLIPSE」突入${reason ? ` / ${reason}` : ""}`, "win");
+  playCutin("upper");
+  playLcdScene("UPPER_ENTER", { duration: 1900, loop: false });
 }
 
 function endAT() {
@@ -507,6 +731,7 @@ function endAT() {
   state.mode = pickNextMode(state.setting);
   state.ceiling = pickCeiling(state.mode);
   makeLog(`AT終了。一撃 ${shot}枚。通常へ。`, shot >= 800 ? "highlight" : "");
+  playLcdScene("AT_END", { duration: 1000, loop: false, subtitle: `一撃 ${shot}枚。次の当たりへ。` });
 }
 
 function processNormalPhase(role) {
@@ -606,6 +831,7 @@ function processCzPhase(role) {
   if (state.czGamesLeft <= 0) {
     const successRate = clamp(state.czSuccessRate * 0.44 * SETTING_DATA[state.setting].cz, 5, 97);
     if (state.czForceSuccess || Math.random() * 100 < successRate) {
+      playLcdScene("CZ_SUCCESS", { duration: 1400, loop: false });
       startAT(randInt(180, 300), "CZ成功");
     } else {
       state.phase = "NORMAL";
@@ -613,6 +839,7 @@ function processCzPhase(role) {
       state.czSuccessRate = 0;
       state.czForceSuccess = false;
       makeLog(`CZ失敗。通常へ。`, "");
+      playLcdScene("CZ_FAIL", { duration: 1100, loop: false });
     }
   }
 
@@ -707,14 +934,17 @@ function processBattlePhase(role) {
         const add = randInt(40, 80);
         state.atRemain += add;
         makeLog(`${state.battleEnemy.name} 撃破。+${add}枚`, "win");
+        playLcdScene("BATTLE_WIN", { duration: 1000, loop: false, subtitle: `+${add}枚上乗せ。追撃に期待。` });
       } else if (rewardRoll === "medium") {
         const add = randInt(90, 180);
         state.atRemain += add;
         makeLog(`${state.battleEnemy.name} 撃破。+${add}枚`, "win");
+        playLcdScene("BATTLE_WIN", { duration: 1150, loop: false, subtitle: `+${add}枚上乗せ。さらに伸ばせ。` });
       } else if (rewardRoll === "large") {
         const add = randInt(220, 420);
         state.atRemain += add;
         makeLog(`${state.battleEnemy.name} 撃破。大上乗せ +${add}枚`, "win");
+        playLcdScene("BATTLE_WIN", { duration: 1300, loop: false, subtitle: `大上乗せ +${add}枚。波が来ている。` });
       } else {
         startFrenzy(weightedPick(state.upperMode ? { KING_EATER: 50, CENTIPEDE_RUSH: 35, NIGHT_RAID: 15 } : { CENTIPEDE_RUSH: 42, NIGHT_RAID: 40, KING_EATER: 18 }));
         state.battleEnemy = null;
@@ -724,6 +954,7 @@ function processBattlePhase(role) {
       }
     } else {
       makeLog(`${state.battleEnemy.name} に敗北。AT継続。`, "");
+      playLcdScene("BATTLE_LOSE", { duration: 900, loop: false, subtitle: "敗北後もAT継続。巻き返しへ。" });
     }
     state.phase = "AT";
     state.battleEnemy = null;
@@ -745,6 +976,7 @@ function processFrenzyPhase(role) {
   state.atRemain += add;
   state.frenzyGamesLeft -= 1;
   makeLog(`${frenzy.label} +${add}枚`, "win");
+  playLcdScene(state.frenzyType === "NIGHT_RAID" ? "FRENZY_NIGHT_RAID" : state.frenzyType === "CENTIPEDE_RUSH" ? "FRENZY_CENTIPEDE_RUSH" : "FRENZY_KING_EATER", { duration: 850, loop: false, subtitle: `${frenzy.label} +${add}枚` });
 
   if (role.key === "eye") enterKakugan(20);
   if (role.key === "crush" && state.frenzyType !== "KING_EATER" && Math.random() < 0.25) {
@@ -836,6 +1068,8 @@ function renderStats() {
   dom.autoBtn.textContent = state.autoMode ? "AUTO ON" : "AUTO OFF";
   renderFlags();
   renderScreen();
+  updateCinematicByPhase();
+  updatePersistentLCD();
   renderLogs();
 }
 
@@ -907,6 +1141,9 @@ function clearAllRuntime() {
     runtime.intervals[index] = null;
   });
   clearTimeout(runtime.autoTimer);
+  clearTimeout(runtime.fxTimer);
+  clearTimeout(runtime.lcdTimer);
+  if (dom.cutinVideo) { dom.cutinVideo.pause(); dom.cutinVideo.classList.add("hidden"); dom.cutinVideo.classList.remove("visible"); }
   dom.leverBtn.disabled = false;
   dom.stopBtns.forEach((btn) => (btn.disabled = true));
 }
