@@ -1,0 +1,342 @@
+/*
+ * Stylesheet for Dark Ghoul AT simulator
+ *
+ * This file defines a dark, high‑contrast palette suitable for a smartphone in
+ * portrait orientation. The layout is composed of three vertical sections:
+ * 1. The top bar displays the machine name, credits, difference and various
+ *    counters. Debug information only appears when the debug mode is enabled.
+ * 2. The main display contains the LCD/video area, the simple reel display
+ *    and an optional log panel for debugging. Videos are layered so that
+ *    background loops, cut‑ins and LCD animations can play independently.
+ * 3. The bottom control panel houses the bet lever, stop buttons and
+ *    auxiliary controls such as AUTO and SKIP.
+ */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  background-color: #0a0a0f;
+  color: #f2f2f2;
+}
+
+/* Top bar */
+#top-bar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem;
+  background-color: #12121a;
+  border-bottom: 1px solid #333;
+}
+
+#top-bar .left-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+#top-bar #machine-name {
+  font-weight: bold;
+  font-size: 1rem;
+}
+
+#top-bar #menu-btn {
+  background: none;
+  border: none;
+  color: #f2f2f2;
+  font-size: 1.5rem;
+  cursor: pointer;
+}
+
+#status-panel {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+}
+
+.status-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+}
+
+.status-item label {
+  font-size: 0.65rem;
+  color: #888;
+  margin-bottom: 0.1rem;
+}
+
+.status-item span {
+  font-size: 0.85rem;
+  font-weight: bold;
+}
+
+/* Main display */
+#main-display {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0.5rem 0.5rem;
+  overflow-y: auto;
+}
+
+/* LCD/Video container */
+#lcd-container {
+  position: relative;
+  width: 100%;
+  height: 40vh;
+  max-height: 50vh;
+  background-color: #0f0f18;
+  border: 1px solid #222;
+  border-radius: 4px;
+  overflow: hidden;
+  /*
+   * Enable 3D context for CSS transforms. This allows the screen‑shake
+   * animation (defined below) to translate the container without
+   * flattening its contents. The perspective value controls the
+   * intensity of 3D effects; increase it for subtler shaking.
+   */
+  perspective: 1000px;
+  transform-style: preserve-3d;
+}
+
+/*
+ * Screen shake animation used during strong or special cut‑ins. When the
+ * `.shake` class is applied to the LCD container, this keyframe
+ * sequence produces a brief jitter. The values are kept small to
+ * avoid triggering motion sickness on mobile devices.
+ */
+@keyframes screen-shake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-4px, 2px); }
+  40% { transform: translate(3px, -3px); }
+  60% { transform: translate(-2px, 4px); }
+  80% { transform: translate(2px, -2px); }
+  100% { transform: translate(0, 0); }
+}
+
+/* Class toggled by JavaScript to trigger the shake animation */
+.shake {
+  animation: screen-shake 0.4s ease-in-out;
+}
+
+.video-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  background: black;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* Reel container */
+#reel-container {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-around;
+  align-items: center;
+  width: 100%;
+  margin-top: 1rem;
+  padding: 0 0.5rem;
+}
+
+.reel {
+  flex: 1;
+  max-width: 30%;
+  height: 6rem;
+  margin: 0 0.2rem;
+  border: 2px solid #333;
+  border-radius: 4px;
+  background-color: #1a1a24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+}
+
+.reel .symbol {
+  font-size: 2rem;
+  font-weight: bold;
+  color: #d9455f;
+  animation: fade-in 0.2s ease-in-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-0.5rem); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Log panel for debugging */
+#log-panel {
+  width: 100%;
+  max-height: 8rem;
+  overflow-y: auto;
+  padding: 0.25rem;
+  margin-top: 0.5rem;
+  background-color: #0d0d14;
+  border: 1px solid #333;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  line-height: 1.2;
+}
+
+#log-panel div {
+  margin-bottom: 0.1rem;
+}
+
+/* Control panel */
+#control-panel {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.25rem;
+  background-color: #12121a;
+  border-top: 1px solid #333;
+}
+
+.btn.control {
+  flex: 1;
+  margin: 0 0.15rem;
+  padding: 0.5rem 0;
+  font-size: 0.75rem;
+  font-weight: bold;
+  border: none;
+  border-radius: 4px;
+  background-color: #28283d;
+  color: #f2f2f2;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.btn.control:active {
+  background-color: #3a3a55;
+}
+
+.btn.control:disabled {
+  background-color: #2a2a40;
+  color: #666;
+  cursor: not-allowed;
+}
+
+/* Modal overlay */
+#modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0,0,0,0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+#modal-content {
+  background-color: #1a1a24;
+  border: 1px solid #333;
+  border-radius: 6px;
+  width: 90vw;
+  max-width: 480px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem;
+  border-bottom: 1px solid #333;
+}
+
+#modal-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+#modal-close-btn {
+  background: none;
+  border: none;
+  color: #f2f2f2;
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+#modal-body {
+  padding: 0.75rem;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 0.8rem;
+}
+
+/* Basic form styles in modal */
+.modal-section {
+  margin-bottom: 1rem;
+}
+
+.modal-section h3 {
+  margin-top: 0;
+  margin-bottom: 0.25rem;
+  font-size: 0.95rem;
+}
+
+.modal-section label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  color: #aaa;
+}
+
+.modal-section select,
+.modal-section input[type="number"],
+.modal-section input[type="text"],
+.modal-section textarea {
+  width: 100%;
+  padding: 0.35rem;
+  margin-bottom: 0.5rem;
+  border: 1px solid #333;
+  border-radius: 3px;
+  background-color: #2a2a40;
+  color: #eee;
+  font-size: 0.8rem;
+}
+
+.modal-section button {
+  padding: 0.4rem 0.6rem;
+  font-size: 0.75rem;
+  border: none;
+  border-radius: 4px;
+  background-color: #3a3a55;
+  color: #f2f2f2;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.modal-section button:active {
+  background-color: #47476a;
+}
+
+/* Hide elements with debug-only class until debug enabled */
+.debug-only {
+  display: none;
+}

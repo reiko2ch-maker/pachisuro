@@ -1,216 +1,76 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="ECLIPSE DEVOURER - ダークファンタジーAT機シミュレーター" />
-  <title>ECLIPSE DEVOURER | GitHub-ready Local Slot App</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;800&family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Dark Ghoul AT Simulator</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <div id="app" class="app-shell">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">DARK FANTASY BATTLE AT MACHINE</p>
-        <h1>ECLIPSE DEVOURER</h1>
+  <!-- Top bar: displays basic status and access to the menu -->
+  <header id="top-bar">
+    <div class="left-group">
+      <button id="menu-btn" aria-label="Menu">☰</button>
+      <span id="machine-name">Dark Ghoul AT</span>
+    </div>
+    <div id="status-panel">
+      <div class="status-item"><label>Credits</label><span id="credits">0</span></div>
+      <div class="status-item"><label>Difference</label><span id="difference">0</span></div>
+      <div class="status-item"><label>Game</label><span id="game-count">0</span></div>
+      <div class="status-item debug-only"><label>State</label><span id="debug-state">-</span></div>
+      <div class="status-item debug-only"><label>Mode</label><span id="debug-mode">-</span></div>
+    </div>
+  </header>
+
+  <!-- Main display area: shows reels and LCD video/graphics -->
+  <main id="main-display">
+    <div id="lcd-container">
+      <!-- background layer for looping videos or CSS animations -->
+      <video id="background-video" class="video-layer" autoplay loop muted playsinline></video>
+      <!-- cut-in layer for short bursts of video -- can overlay background -->
+      <video id="cutin-video" class="video-layer hidden" muted playsinline></video>
+      <!-- lcd layer for smaller video animations or CSS effects -->
+      <video id="lcd-video" class="video-layer hidden" muted playsinline></video>
+    </div>
+    <div id="reel-container">
+      <div class="reel" id="reel1">
+        <div class="symbol">-</div>
       </div>
-      <div class="topbar-actions">
-        <button id="open-home" class="ghost-button">HOME</button>
-        <button id="save-btn" class="ghost-button">SAVE</button>
-        <button id="load-btn" class="ghost-button">LOAD</button>
+      <div class="reel" id="reel2">
+        <div class="symbol">-</div>
       </div>
-    </header>
-
-    <main class="main-grid">
-      <section class="machine-card">
-        <div class="machine-top">
-          <div>
-            <p class="machine-subtitle">Original browser app for GitHub Pages / local use</p>
-            <h2 id="phase-label">通常</h2>
-          </div>
-          <div class="status-flags">
-            <span id="flag-mode" class="status-pill">MODE A</span>
-            <span id="flag-kakugan" class="status-pill">EYE 0G</span>
-            <span id="flag-upper" class="status-pill off">UPPER OFF</span>
-            <span id="flag-through" class="status-pill off">THROUGH 0</span>
-          </div>
-        </div>
-
-        <section class="lcd-shell">
-          <div class="lcd-header">
-            <div>
-              <p class="lcd-eyebrow">LIQUID CRYSTAL CINEMATIC DISPLAY</p>
-              <h3 id="lcd-title">STANDBY MODE</h3>
-            </div>
-            <span id="lcd-badge" class="lcd-badge">NORMAL</span>
-          </div>
-          <div id="lcd-frame" class="lcd-frame theme-normal">
-            <video id="lcd-video" class="lcd-video hidden" playsinline muted preload="metadata"></video>
-            <div class="lcd-fallback-art"></div>
-            <div class="lcd-scanline"></div>
-            <div class="lcd-noise"></div>
-            <div class="lcd-copy">
-              <p id="lcd-subtitle">映像アセット未配置時は液晶演出に自動フォールバック</p>
-            </div>
-          </div>
-        </section>
-
-        <div class="reel-frame">
-          <div class="cinematic-stage" id="cinematic-stage">
-            <video id="bg-video" class="bg-video hidden" playsinline muted loop preload="metadata"></video>
-            <video id="cutin-video" class="cutin-video hidden" playsinline muted preload="metadata"></video>
-            <div id="fx-vignette" class="fx-vignette"></div>
-            <div id="fx-flash" class="fx-flash"></div>
-            <div id="fx-glitch" class="fx-glitch"></div>
-            <div id="fx-particles" class="fx-particles"></div>
-          </div>
-          <div class="screen-overlay" id="screen-overlay">
-            <div class="screen-copy">
-              <p id="screen-small">STAND BY</p>
-              <h3 id="screen-big">PRESS LEVER</h3>
-              <p id="screen-mid">ダークファンタジーAT機 / 設定変更・セーブ対応</p>
-            </div>
-          </div>
-          <div class="reel-window">
-            <div class="reel-column">
-              <div class="reel-strip" id="reel-0"></div>
-            </div>
-            <div class="reel-column">
-              <div class="reel-strip" id="reel-1"></div>
-            </div>
-            <div class="reel-column">
-              <div class="reel-strip" id="reel-2"></div>
-            </div>
-            <div class="payline"></div>
-          </div>
-          <div class="machine-glow"></div>
-        </div>
-
-        <div class="control-panel">
-          <div class="medal-area">
-            <div class="metric-block">
-              <span class="metric-label">所持枚数</span>
-              <strong id="credit-value">500</strong>
-            </div>
-            <div class="metric-block">
-              <span class="metric-label">累計差枚</span>
-              <strong id="total-diff">0</strong>
-            </div>
-            <div class="metric-block accent">
-              <span class="metric-label">AT残差枚</span>
-              <strong id="at-remain">0</strong>
-            </div>
-          </div>
-          <div class="control-buttons">
-            <button id="lever-btn" class="primary-button">LEVER ON</button>
-            <button id="stop-0" class="stop-button" disabled>STOP 1</button>
-            <button id="stop-1" class="stop-button" disabled>STOP 2</button>
-            <button id="stop-2" class="stop-button" disabled>STOP 3</button>
-            <button id="auto-btn" class="ghost-button">AUTO OFF</button>
-          </div>
-        </div>
-      </section>
-
-      <aside class="side-panel">
-        <section class="panel-section">
-          <div class="section-title-row">
-            <h3>セッション</h3>
-            <span id="setting-badge" class="info-badge">設定1</span>
-          </div>
-          <div class="stats-grid">
-            <div class="stat-box"><span>通常G</span><strong id="normal-games">0</strong></div>
-            <div class="stat-box"><span>総回転</span><strong id="total-games">0</strong></div>
-            <div class="stat-box"><span>CZ</span><strong id="cz-count">0</strong></div>
-            <div class="stat-box"><span>AT</span><strong id="at-count">0</strong></div>
-            <div class="stat-box"><span>EP BONUS</span><strong id="ep-count">0</strong></div>
-            <div class="stat-box"><span>最大一撃</span><strong id="best-shot">0</strong></div>
-          </div>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-title-row">
-            <h3>内部状況</h3>
-            <span id="debug-badge" class="info-badge muted">演出モード</span>
-          </div>
-          <div class="internal-grid">
-            <div><span>内部モード</span><strong id="mode-readout">A</strong></div>
-            <div><span>前兆</span><strong id="pre-readout">-</strong></div>
-            <div><span>CZポイント</span><strong id="cz-point">0</strong></div>
-            <div><span>天井</span><strong id="ceiling-readout">600</strong></div>
-            <div><span>上位滞在</span><strong id="upper-readout">OFF</strong></div>
-            <div><span>貫きストック</span><strong id="through-readout">0</strong></div>
-          </div>
-        </section>
-
-        <section class="panel-section">
-          <div class="section-title-row">
-            <h3>演出 / ログ</h3>
-            <button id="toggle-debug" class="mini-button">詳細表示</button>
-          </div>
-          <div id="event-log" class="event-log"></div>
-        </section>
-      </aside>
-    </main>
-  </div>
-
-  <div id="home-modal" class="modal visible">
-    <div class="modal-card large">
-      <div class="modal-header">
-        <div>
-          <p class="eyebrow">GITHUB-READY COMPLETE EDITION</p>
-          <h2>ECLIPSE DEVOURER</h2>
-        </div>
-        <button id="close-home" class="ghost-button">閉じる</button>
+      <div class="reel" id="reel3">
+        <div class="symbol">-</div>
       </div>
-      <div class="modal-body home-grid">
-        <section class="home-block">
-          <h3>ゲーム開始</h3>
-          <p>完全オリジナルのダークファンタジーAT機。設定変更、セーブ、上位モード貫き、一撃特化ゾーンを搭載。</p>
-          <div class="home-actions">
-            <button id="new-game" class="primary-button">NEW GAME</button>
-            <button id="resume-game" class="ghost-button">CONTINUE</button>
-          </div>
-        </section>
+    </div>
+    <div id="log-panel" class="debug-only"></div>
+  </main>
 
-        <section class="home-block">
-          <h3>設定変更</h3>
-          <div class="setting-grid" id="setting-grid"></div>
-          <label class="toggle-row">
-            <span>オート停止を使う</span>
-            <input id="auto-stop-default" type="checkbox" />
-          </label>
-        </section>
+  <!-- Control panel: bet, lever, stops, auto, skip -->
+  <footer id="control-panel">
+    <button id="bet-btn" class="btn control">BET</button>
+    <button id="lever-btn" class="btn control">LEVER</button>
+    <button id="stop1-btn" class="btn control">1</button>
+    <button id="stop2-btn" class="btn control">2</button>
+    <button id="stop3-btn" class="btn control">3</button>
+    <button id="auto-btn" class="btn control">AUTO</button>
+    <button id="skip-btn" class="btn control">SKIP</button>
+  </footer>
 
-        <section class="home-block">
-          <h3>保存管理</h3>
-          <p class="home-note">※ 映像は著作権的に、公式素材の同梱は不可。手持ちの権利クリア済み動画のみ差し替え対応。</p>
-          <div class="home-actions vertical">
-            <button id="manual-save" class="ghost-button">手動セーブ</button>
-            <button id="manual-load" class="ghost-button">ロード</button>
-            <button id="export-save" class="ghost-button">セーブ書き出し</button>
-            <button id="reset-save" class="danger-button">セーブ削除</button>
-          </div>
-          <textarea id="save-text" class="save-text" placeholder="書き出したセーブデータがここに表示されます"></textarea>
-        </section>
-
-        <section class="home-block">
-          <h3>実装済み要素</h3>
-          <ul class="feature-list">
-            <li>通常 / 赫眼 / CZ / EP BONUS / AT / 3種特化 / 上位モード</li>
-            <li>上位終了後の貫きチャンスと直行優遇</li>
-            <li>設定1〜6、モード管理、天井、前兆、差枚管理</li>
-            <li>自動セーブ、手動セーブ、ロード、GitHub Pages対応</li>
-            <li>デバッグ表示とイベントログ</li>
-            <li>動画対応の演出レイヤー（ユーザー保有素材を assets/video に配置）</li>
-          </ul>
-        </section>
+  <!-- Modal overlay: contains various panels (settings, stats, save/load, etc.) -->
+  <div id="modal-overlay" class="hidden">
+    <div id="modal-content">
+      <header id="modal-header">
+        <h2 id="modal-title">Menu</h2>
+        <button id="modal-close-btn" aria-label="Close">✕</button>
+      </header>
+      <div id="modal-body">
+        <!-- Content dynamically injected by app.js -->
       </div>
     </div>
   </div>
 
+  <script src="machine-config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

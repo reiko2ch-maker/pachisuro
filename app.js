@@ -1,1279 +1,1480 @@
-const SAVE_KEY = "eclipse-devourer-save-v1";
-const MAX_LOG = 80;
-const SYMBOL_POOL = ["✦", "☾", "☽", "✧", "✴", "⬢", "⬡"];
-const PHASE_LABELS = {
-  NORMAL: "通常",
-  PRELUDE: "前兆",
-  CZ: "BLOOD GATE",
-  EP_BONUS: "ECLIPSE BONUS",
-  AT: "DEVOUR RUSH",
-  BATTLE: "ABYSS BATTLE",
-  FRENZY: "FRENZY ZONE"
-};
+/*
+ * app.js
+ *
+ * Core logic and UI wiring for the Dark Ghoul AT simulator. The code is
+ * organised into a few key parts:
+ *  - A simple seeded pseudo random number generator (PRNG) for reproducible
+ *    simulations.
+ *  - Utility functions for weighted random selections.
+ *  - A SlotMachine class encapsulating the state machine and all game
+ *    mechanics (normal spins, CZs, AT, zones, battles, judgment, etc.).
+ *  - A small UI layer that binds HTML controls to the machine, updates
+ *    display elements and manages modals for settings, statistics and
+ *    persistence.
+ *
+ * All probabilities and tunable parameters live in machine-config.js. By
+ * modifying MACHINE_CONFIG you can adjust the behaviour of this simulator or
+ * substitute your own values. See the README for guidance.
+ */
 
-const ROLES = {
-  blank: { key: "blank", label: "ハズレ", icon: "✦", payout: 0 },
-  bell: { key: "bell", label: "ベル", icon: "🔔", payout: 8 },
-  replay: { key: "replay", label: "リプレイ", icon: "↺", payout: 0 },
-  cherry: { key: "cherry", label: "チェリー", icon: "🍒", payout: 3 },
-  moon: { key: "moon", label: "ムーン", icon: "🌙", payout: 6 },
-  chance: { key: "chance", label: "チャンス目", icon: "⚔️", payout: 10 },
-  eye: { key: "eye", label: "下段リプレイ", icon: "👁️", payout: 0 },
-  crush: { key: "crush", label: "強レア役", icon: "💀", payout: 15 }
-};
+(() => {
+  'use strict';
 
-const SETTING_DATA = {
-  1: { cz: 1.0, ep: 1.0, at: 1.0, heaven: 0.06, upper: 1.0, battle: 1.0 },
-  2: { cz: 1.05, ep: 1.03, at: 1.02, heaven: 0.08, upper: 1.04, battle: 1.02 },
-  3: { cz: 1.08, ep: 1.06, at: 1.04, heaven: 0.11, upper: 1.08, battle: 1.04 },
-  4: { cz: 1.12, ep: 1.1, at: 1.08, heaven: 0.15, upper: 1.12, battle: 1.08 },
-  5: { cz: 1.18, ep: 1.16, at: 1.13, heaven: 0.2, upper: 1.18, battle: 1.14 },
-  6: { cz: 1.25, ep: 1.24, at: 1.2, heaven: 0.28, upper: 1.28, battle: 1.22 }
-};
-
-const MODE_TABLE = {
-  A: [150, 250, 350, 450, 600],
-  B: [100, 200, 300, 400, 500],
-  C: [100, 150, 250, 350, 450],
-  chance: [50, 100, 150, 200],
-  prep: [50, 100, 150],
-  heaven: [30, 50, 80, 100]
-};
-
-const ROLE_WEIGHTS = {
-  NORMAL: { blank: 46, bell: 30, replay: 15, cherry: 4.2, moon: 2.4, chance: 1.2, eye: 0.6, crush: 0.6 },
-  EYE: { blank: 0, bell: 20, replay: 14, cherry: 34, moon: 20, chance: 7, eye: 2, crush: 3 },
-  CZ: { blank: 34, bell: 32, replay: 17, cherry: 7, moon: 4, chance: 4, eye: 0, crush: 2 },
-  EP: { blank: 0, bell: 28, replay: 15, cherry: 22, moon: 18, chance: 10, eye: 0, crush: 7 },
-  AT: { blank: 27, bell: 38, replay: 16, cherry: 9, moon: 6, chance: 2, eye: 1, crush: 1 },
-  AT_EYE: { blank: 0, bell: 20, replay: 14, cherry: 32, moon: 18, chance: 8, eye: 2, crush: 6 },
-  BATTLE: { blank: 4, bell: 30, replay: 12, cherry: 18, moon: 15, chance: 11, eye: 2, crush: 8 },
-  FRENZY: { blank: 0, bell: 22, replay: 10, cherry: 24, moon: 20, chance: 14, eye: 0, crush: 10 }
-};
-
-const ENEMIES = [
-  { name: "DREAD HOUND", win: 36 },
-  { name: "BLOOD REAPER", win: 50 },
-  { name: "ABYSS EATER", win: 66 },
-  { name: "CROWN EXECUTOR", win: 82 }
-];
-
-const FRENZY_TYPES = {
-  NIGHT_RAID: { label: "NIGHT RAID", games: [5, 6, 7], addMin: 15, addMax: 50 },
-  CENTIPEDE_RUSH: { label: "CENTIPEDE RUSH", games: [4, 5], addMin: 40, addMax: 100 },
-  KING_EATER: { label: "KING EATER", games: [3, 4], addMin: 80, addMax: 320 }
-};
-
-const $ = (id) => document.getElementById(id);
-
-const dom = {
-  phaseLabel: $("phase-label"),
-  flagMode: $("flag-mode"),
-  flagKakugan: $("flag-kakugan"),
-  flagUpper: $("flag-upper"),
-  flagThrough: $("flag-through"),
-  creditValue: $("credit-value"),
-  totalDiff: $("total-diff"),
-  atRemain: $("at-remain"),
-  leverBtn: $("lever-btn"),
-  stopBtns: [$("stop-0"), $("stop-1"), $("stop-2")],
-  autoBtn: $("auto-btn"),
-  normalGames: $("normal-games"),
-  totalGames: $("total-games"),
-  czCount: $("cz-count"),
-  atCount: $("at-count"),
-  epCount: $("ep-count"),
-  bestShot: $("best-shot"),
-  settingBadge: $("setting-badge"),
-  modeReadout: $("mode-readout"),
-  preReadout: $("pre-readout"),
-  czPoint: $("cz-point"),
-  ceilingReadout: $("ceiling-readout"),
-  upperReadout: $("upper-readout"),
-  throughReadout: $("through-readout"),
-  eventLog: $("event-log"),
-  debugBadge: $("debug-badge"),
-  screenSmall: $("screen-small"),
-  screenBig: $("screen-big"),
-  screenMid: $("screen-mid"),
-  homeModal: $("home-modal"),
-  openHome: $("open-home"),
-  closeHome: $("close-home"),
-  newGame: $("new-game"),
-  resumeGame: $("resume-game"),
-  settingGrid: $("setting-grid"),
-  autoStopDefault: $("auto-stop-default"),
-  saveBtn: $("save-btn"),
-  loadBtn: $("load-btn"),
-  manualSave: $("manual-save"),
-  manualLoad: $("manual-load"),
-  exportSave: $("export-save"),
-  resetSave: $("reset-save"),
-  saveText: $("save-text"),
-  toggleDebug: $("toggle-debug"),
-  reels: [$("reel-0"), $("reel-1"), $("reel-2")],
-  bgVideo: $("bg-video"),
-  cutinVideo: $("cutin-video"),
-  fxFlash: $("fx-flash"),
-  fxGlitch: $("fx-glitch"),
-  cinematicStage: $("cinematic-stage"),
-  machineGlow: document.querySelector(".machine-glow"),
-  lcdFrame: $("lcd-frame"),
-  lcdVideo: $("lcd-video"),
-  lcdTitle: $("lcd-title"),
-  lcdSubtitle: $("lcd-subtitle"),
-  lcdBadge: $("lcd-badge")
-};
-
-const runtime = {
-  spinning: false,
-  currentOutcome: null,
-  currentStopIndex: 0,
-  intervals: [null, null, null],
-  autoTimer: null,
-  reelViews: [[], [], []],
-  fxTimer: null,
-  lcdLockUntil: 0,
-  lcdSceneKey: "NORMAL_IDLE",
-  lcdTimer: null
-};
-
-
-const CINEMATIC_SCENES = {
-  NORMAL: { tone: "purple", bg: "assets/video/normal-loop.webm", fallback: "shadow" },
-  PRELUDE: { tone: "anger", bg: "assets/video/prelude-loop.webm", fallback: "pulse" },
-  CZ: { tone: "anger", bg: "assets/video/cz-loop.webm", fallback: "scan" },
-  EP_BONUS: { tone: "gold", bg: "assets/video/bonus-loop.webm", fallback: "spark" },
-  AT: { tone: "purple", bg: "assets/video/at-loop.webm", fallback: "pulse" },
-  BATTLE: { tone: "anger", bg: "assets/video/battle-loop.webm", fallback: "scan" },
-  FRENZY: { tone: "gold", bg: "assets/video/frenzy-loop.webm", fallback: "spark" }
-};
-const CUTIN_ASSETS = {
-  kakugan: "assets/video/cutin-kakugan.webm",
-  cz: "assets/video/cutin-cz.webm",
-  ep: "assets/video/cutin-ep.webm",
-  at: "assets/video/cutin-at.webm",
-  battle: "assets/video/cutin-battle.webm",
-  frenzy: "assets/video/cutin-frenzy.webm",
-  upper: "assets/video/cutin-upper.webm",
-  through: "assets/video/cutin-through.webm"
-};
-const ASSET_EXTS = [".webm", ".mp4"];
-const LCD_SCENES = {
-  NORMAL_IDLE: { asset: "assets/video/lcd-normal-idle", badge: "NORMAL", theme: "theme-normal", title: "SHADOW DISTRICT", subtitle: "静寂の通常時。レア役・ゲーム数・前兆を監視。" },
-  NORMAL_KAKUGAN: { asset: "assets/video/lcd-kakugan", badge: "KAKUGAN", theme: "theme-kakugan", title: "SCARLET EYE", subtitle: "赫眼示唆。レア役密度上昇中。" },
-  PRELUDE_CZ: { asset: "assets/video/lcd-prelude-cz", badge: "PRELUDE", theme: "theme-cz", title: "BLOOD GATE PRELUDE", subtitle: "不穏な前兆。CZへ発展。" },
-  PRELUDE_EP: { asset: "assets/video/lcd-prelude-ep", badge: "PRELUDE", theme: "theme-bonus", title: "EPISODE PRELUDE", subtitle: "強い前兆。BONUSへ昇格の気配。" },
-  PRELUDE_AT: { asset: "assets/video/lcd-prelude-at", badge: "PRELUDE", theme: "theme-at", title: "RUSH PRELUDE", subtitle: "直AT前兆。液晶がざわつく。" },
-  CZ_IDLE: { asset: "assets/video/lcd-cz-idle", badge: "CZ", theme: "theme-cz", title: "BLOOD GATE", subtitle: "8Gで突破を狙う。演出煽りとレア役が鍵。" },
-  CZ_SUCCESS: { asset: "assets/video/lcd-cz-success", badge: "CZ SUCCESS", theme: "theme-bonus", title: "GATE BREAK", subtitle: "扉が開かれた。AT突入確定。" },
-  CZ_FAIL: { asset: "assets/video/lcd-cz-fail", badge: "CZ FAIL", theme: "theme-cz", title: "GATE CLOSED", subtitle: "失敗。ただし次の前兆に注意。" },
-  EP_START: { asset: "assets/video/lcd-ep-start", badge: "BONUS", theme: "theme-bonus", title: "ECLIPSE BONUS", subtitle: "当たり中。消化中の上乗せに期待。" },
-  AT_START: { asset: "assets/video/lcd-at-start", badge: "AT", theme: "theme-at", title: "DEVOUR RUSH", subtitle: "差枚AT開幕。対決と特化で伸ばせ。" },
-  AT_IDLE: { asset: "assets/video/lcd-at-idle", badge: "AT", theme: "theme-at", title: "RUSH STATE", subtitle: "対決ポイント蓄積中。" },
-  AT_UPPER: { asset: "assets/video/lcd-at-upper", badge: "UPPER", theme: "theme-upper", title: "CROWN ECLIPSE", subtitle: "上位AT滞在中。期待枚数上昇。" },
-  BATTLE_ENTRY: { asset: "assets/video/lcd-battle-entry", badge: "BATTLE", theme: "theme-battle", title: "ABYSS BATTLE", subtitle: "敵を撃破して大量上乗せを掴め。" },
-  BATTLE_WIN: { asset: "assets/video/lcd-battle-win", badge: "WIN", theme: "theme-upper", title: "BATTLE VICTORY", subtitle: "上乗せ・特化のチャンス。" },
-  BATTLE_LOSE: { asset: "assets/video/lcd-battle-lose", badge: "LOSE", theme: "theme-battle", title: "BATTLE LOST", subtitle: "敗北後もATは継続。" },
-  FRENZY_NIGHT_RAID: { asset: "assets/video/lcd-frenzy-night-raid", badge: "FRENZY", theme: "theme-frenzy", title: "NIGHT RAID", subtitle: "軽快に差枚を重ねる特化。" },
-  FRENZY_CENTIPEDE_RUSH: { asset: "assets/video/lcd-frenzy-centipede-rush", badge: "FRENZY", theme: "theme-frenzy", title: "CENTIPEDE RUSH", subtitle: "中位特化。強い連打に期待。" },
-  FRENZY_KING_EATER: { asset: "assets/video/lcd-frenzy-king-eater", badge: "FRENZY", theme: "theme-frenzy", title: "KING EATER", subtitle: "最上位の一撃特化。大台へ。" },
-  UPPER_ENTER: { asset: "assets/video/lcd-upper-enter", badge: "UPPER", theme: "theme-upper", title: "CROWN ECLIPSE AWAKEN", subtitle: "上位モード突入。暴走開始。" },
-  THROUGH_ENTER: { asset: "assets/video/lcd-through-enter", badge: "THROUGH", theme: "theme-upper", title: "THROUGH CHANCE", subtitle: "貫きストック獲得。次回上位優遇。" },
-  AT_END: { asset: "assets/video/lcd-at-end", badge: "ENDING", theme: "theme-normal", title: "RUSH END", subtitle: "静寂へ戻る。次の当たりを狙え。" },
-  RARE_CHERRY: { asset: "assets/video/lcd-rare-cherry", badge: "RARE", theme: "theme-kakugan", title: "CHERRY", subtitle: "小役成立。前兆とポイント加算に期待。" },
-  RARE_MOON: { asset: "assets/video/lcd-rare-moon", badge: "RARE", theme: "theme-at", title: "MOON", subtitle: "やや強めのレア役。発展期待度アップ。" },
-  RARE_CHANCE: { asset: "assets/video/lcd-rare-chance", badge: "RARE", theme: "theme-cz", title: "CHANCE PATTERN", subtitle: "チャンス目。CZ・AT直撃に期待。" },
-  RARE_CRUSH: { asset: "assets/video/lcd-rare-crush", badge: "RARE", theme: "theme-upper", title: "CRUSH", subtitle: "強レア役。大きな展開の起点。" }
-};
-function normalizeAssetBase(path) {
-  if (!path) return null;
-  return path.replace(/\.(webm|mp4)$/i, "");
-}
-function loadVideoAsset(el, assetBase, { loop = false, showClass = "visible" } = {}) {
-  if (!el) return;
-  const normalized = normalizeAssetBase(assetBase);
-  if (!normalized) {
-    el.pause();
-    el.removeAttribute("src");
-    el.dataset.base = "";
-    el.classList.add("hidden");
-    el.classList.remove(showClass);
-    el.load();
-    return;
+  /**
+   * PRNG based on mulberry32 algorithm. It stores its seed so that the
+   * generator state can be serialised and restored. See
+   * https://stackoverflow.com/questions/521295/seeding-the-random-number-generator-in-javascript
+   */
+  class PRNG {
+    constructor(seed = Date.now()) {
+      // Force seed into a 32bit unsigned integer
+      this.seed = seed >>> 0;
+    }
+    next() {
+      // Advance the state and return a float between 0 and 1
+      let t = this.seed += 0x6D2B79F5;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      this.seed = t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    }
+    // Allow reading the current seed for saving
+    get state() {
+      return this.seed >>> 0;
+    }
+    set state(val) {
+      this.seed = val >>> 0;
+    }
   }
-  let idx = 0;
-  const tryLoad = () => {
-    const src = `${normalized}${ASSET_EXTS[idx]}`;
-    el.dataset.base = normalized;
-    el.loop = loop;
-    el.src = src;
-    el.classList.remove("hidden");
-    el.classList.add(showClass);
-    el.onloadedmetadata = () => safePlayVideo(el);
-    el.onerror = () => {
-      idx += 1;
-      if (idx < ASSET_EXTS.length) {
-        tryLoad();
-      } else {
-        el.pause();
-        el.classList.add("hidden");
-        el.classList.remove(showClass);
+
+  /**
+   * Pick a key from a weight map. The object keys are strings and values
+   * represent relative probabilities (they do not need to sum to 1). Returns
+   * the selected key. If the map is empty, undefined is returned.
+   *
+   * @param {Object} weightMap
+   * @param {PRNG} rng
+   */
+  function pickWeighted(weightMap, rng) {
+    let total = 0;
+    for (const key in weightMap) {
+      total += weightMap[key];
+    }
+    if (total <= 0) return undefined;
+    const r = rng.next() * total;
+    let acc = 0;
+    for (const key in weightMap) {
+      acc += weightMap[key];
+      if (r < acc) return key;
+    }
+    // Fallback
+    return Object.keys(weightMap)[0];
+  }
+
+  /**
+   * Sample from a geometric distribution with success probability p. Returns
+   * the number of Bernoulli trials until the first success (inclusive). If p
+   * is zero or invalid, returns a large number (Infinity).
+   *
+   * @param {number} p
+   * @param {PRNG} rng
+   */
+  function sampleGeometric(p, rng) {
+    if (!p || p <= 0) return Infinity;
+    // Geometric distribution: number of trials ~ floor(log(U)/log(1-p)) + 1
+    const u = rng.next();
+    return Math.floor(Math.log(1 - u) / Math.log(1 - p)) + 1;
+  }
+
+  /**
+   * Map each role to a display symbol. These are used to render the reel
+   * contents in a simple textual form. Feel free to modify the symbols to
+   * better suit your tastes or incorporate image assets.
+   */
+  const ROLE_SYMBOLS = {
+    replay: '↺',
+    diagonalBell: '☻',
+    weakCherry: '♣',
+    suika: '♦',
+    chanceA: '☆',
+    chanceB: '★',
+    strongCherry: '♠',
+    specialSymbol: '✚',
+    guaranteedCherry: '✪',
+    lowerReplay: '⚡'
+  };
+
+  /**
+   * Main SlotMachine class. It encapsulates the current machine state,
+   * performs spins, transitions between modes and records statistics. The
+   * UI layer communicates with this class via public methods such as
+   * `spin`, `changeSetting`, `saveState` and `loadState`.
+   */
+  class SlotMachine {
+    constructor(config) {
+      this.config = config;
+      // Load persisted setting or default to 1
+      const persistedSetting = parseInt(localStorage.getItem('dg_setting'), 10);
+      this.setting = isNaN(persistedSetting) ? 1 : persistedSetting;
+      // Determine debug flag
+      this.debug = localStorage.getItem('dg_debug') === '1';
+      // Statistics
+      this.stats = {
+        totalSpins: 0,
+        totalCZ: 0,
+        totalStrongCZ: 0,
+        totalEpisode: 0,
+        totalAT: 0,
+        totalATUpper: 0,
+        totalBattles: 0,
+        battleWins: 0,
+        battleLosses: 0,
+        totalZones: 0,
+        totalJudgments: 0,
+        judgmentSuccess: 0,
+        maxDifference: 0
+      };
+      // PRNG with persisted seed or default
+      const persistedSeed = parseInt(localStorage.getItem('dg_seed'), 10);
+      this.rng = new PRNG(isNaN(persistedSeed) ? Date.now() : persistedSeed);
+      // Initialise state
+      this.reset();
+    }
+
+    /**
+     * Reset the machine to its initial state. Counters, differences and
+     * triggers are reinitialised; the setting and debug flag remain.
+     */
+    reset() {
+      // Machine state: NORMAL, KAKUGAN, CZ_STANDARD, CZ_STRONG, EPISODE,
+      // AT_MAIN, BATTLE, ZONE, JUDGMENT
+      this.state = 'NORMAL';
+      this.mode = 'A';
+      this.upperMode = false;
+      // Counters
+      this.gameCount = 0;     // total games since start/reset
+      this.czCounter = 0;      // games since last CZ
+      this.strongCzCounter = 0; // games since last strong CZ
+      this.episodeCounter = 0;  // games since last episode bonus
+      this.atCounter = 0;      // games since last AT
+      // Next triggers (geometric sampling)
+      this.nextCzGame = sampleGeometric(this.currentSetting().czProbability, this.rng);
+      this.nextStrongCzGame = sampleGeometric(this.currentSetting().strongCzProbability, this.rng);
+      this.nextEpisodeGame = sampleGeometric(this.currentSetting().episodeProbability, this.rng);
+      this.nextAtGame = sampleGeometric(this.currentSetting().atProbability, this.rng);
+      // KAKUGAN remaining games and role multiplier
+      this.kakuganRemaining = 0;
+      // CZ state
+      this.czRemaining = 0;
+      this.czSuccessChance = 0;
+      this.czType = 'standard';
+      // EPISODE state
+      this.episodeRemaining = 0;
+      this.episodeBonus = 0;
+      // AT state
+      this.atDifference = 0;
+      this.atMode = 'A';
+      this.nextBattleGame = 0;
+      this.atGameCounter = 0;
+      // Battle state
+      this.battleWinRate = 0;
+      this.battleEnemy = '';
+      // Zone state
+      this.zoneType = '';
+      this.zoneRemaining = 0;
+      // Judgment state
+      this.judgmentPending = false;
+      // Player wallet
+      this.credits = 0;
+      this.difference = 0;
+      this.stats.maxDifference = Math.max(this.stats.maxDifference, this.difference);
+      // Logging buffer for debug
+      this.logLines = [];
+    }
+
+    /**
+     * Return the current setting object.
+     */
+    currentSetting() {
+      return this.config.settings.find(s => s.id === this.setting) || this.config.settings[0];
+    }
+
+    /**
+     * Set a new machine setting (1–6). Resets triggers accordingly.
+     * @param {number} id
+     */
+    setSetting(id) {
+      const numeric = parseInt(id, 10);
+      if (numeric >= 1 && numeric <= this.config.settings.length) {
+        this.setting = numeric;
+        localStorage.setItem('dg_setting', String(numeric));
+        // Resample triggers on setting change
+        this.nextCzGame = sampleGeometric(this.currentSetting().czProbability, this.rng);
+        this.nextStrongCzGame = sampleGeometric(this.currentSetting().strongCzProbability, this.rng);
+        this.nextEpisodeGame = sampleGeometric(this.currentSetting().episodeProbability, this.rng);
+        this.nextAtGame = sampleGeometric(this.currentSetting().atProbability, this.rng);
       }
+    }
+
+    /**
+     * Toggle debug mode. Persist the value in localStorage.
+     * @param {boolean} enabled
+     */
+    setDebug(enabled) {
+      this.debug = !!enabled;
+      localStorage.setItem('dg_debug', this.debug ? '1' : '0');
+    }
+
+    /**
+     * Get the full probability map for roles based on the current setting and
+     * whether the machine is in KAKUGAN. Lower replay probability is setting
+     * dependent and rare roles are scaled during KAKUGAN.
+     */
+    getRoleProbabilities() {
+      const base = { ...this.config.roles };
+      // Override lowerReplay with setting specific value
+      base.lowerReplay = this.currentSetting().lowerReplay;
+      // Copy probabilities to work with
+      const probs = { ...base };
+      // During KAKUGAN we increase the chance of rare roles by factor
+      if (this.state === 'KAKUGAN') {
+        const factor = 3; // boost factor
+        for (const key of ['weakCherry','suika','chanceA','chanceB','strongCherry','specialSymbol','guaranteedCherry']) {
+          probs[key] = (probs[key] || 0) * factor;
+        }
+        // lowerReplay should still be relatively rare
+        probs.lowerReplay = base.lowerReplay;
+      }
+      return probs;
+    }
+
+    /**
+     * Draw a role according to current probabilities. Uses weighted random.
+     */
+    drawRole() {
+      const probs = this.getRoleProbabilities();
+      const role = pickWeighted(probs, this.rng);
+      return role;
+    }
+
+    /**
+     * Handle a lever pull (spin). Performs one game cycle. In this simulator
+     * lever, stop1, stop2 and stop3 are condensed into a single action; the
+     * animation still reflects three reels spinning. Returns an object
+     * describing the result so the UI can update accordingly.
+     */
+    spin() {
+      // Increase counters irrespective of state
+      this.gameCount++;
+      this.czCounter++;
+      this.strongCzCounter++;
+      this.episodeCounter++;
+      this.atCounter++;
+      this.stats.totalSpins++;
+      // Cost per game: assume 3 credits consumed for each spin
+      this.credits -= 3;
+      // Bound credits at zero
+      if (this.credits < 0) this.credits = 0;
+      // Draw a role
+      const role = this.drawRole();
+      // Process according to current state
+      switch (this.state) {
+        case 'NORMAL':
+          this.handleNormal(role);
+          break;
+        case 'KAKUGAN':
+          this.handleKakugan(role);
+          break;
+        case 'CZ_STANDARD':
+        case 'CZ_STRONG':
+          this.handleCZ(role);
+          break;
+        case 'EPISODE':
+          this.handleEpisode(role);
+          break;
+        case 'AT_MAIN':
+          this.handleAT(role);
+          break;
+        case 'BATTLE':
+          this.handleBattle(role);
+          break;
+        case 'ZONE':
+          this.handleZone(role);
+          break;
+        case 'JUDGMENT':
+          this.handleJudgment(role);
+          break;
+        default:
+          // Unknown state: do nothing
+          break;
+      }
+      // Record maximum difference for stats
+      if (this.difference > this.stats.maxDifference) {
+        this.stats.maxDifference = this.difference;
+      }
+      // Return information for UI
+      return {
+        role,
+        state: this.state,
+        difference: this.difference,
+        credits: this.credits,
+        gameCount: this.gameCount,
+        mode: this.mode,
+        debugInfo: {
+          nextCzGame: this.nextCzGame,
+          czCounter: this.czCounter,
+          nextAtGame: this.nextAtGame,
+          atCounter: this.atCounter,
+          kakuganRemaining: this.kakuganRemaining,
+          czSuccessChance: this.czSuccessChance
+        }
+      };
+    }
+
+    /**
+     * Log a message for debugging. Only recorded when debug mode is enabled.
+     * @param {string} msg
+     */
+    log(msg) {
+      if (this.debug) {
+        this.logLines.push(msg);
+        if (this.logLines.length > 200) this.logLines.shift();
+      }
+    }
+
+    /**
+     * Normal state logic. Checks for scheduled triggers and role‑driven
+     * transitions such as entry into KAKUGAN, CZ, episode or AT.
+     * @param {string} role
+     */
+    handleNormal(role) {
+      this.log(`NORMAL: role ${role}`);
+      // Lower replay triggers KAKUGAN
+      if (role === 'lowerReplay') {
+        this.startKakugan();
+        return;
+      }
+      // Rare roles may trigger episodes or strong CZ
+      if (role === 'specialSymbol' || role === 'guaranteedCherry') {
+        if (this.rng.next() < 0.5) {
+          this.startEpisode();
+        } else {
+          this.startCZ('strong');
+        }
+        return;
+      }
+      if (role === 'strongCherry' && this.rng.next() < 0.3) {
+        this.startCZ('strong');
+        return;
+      }
+      // Check scheduled strong CZ
+      if (this.strongCzCounter >= this.nextStrongCzGame) {
+        this.startCZ('strong');
+        return;
+      }
+      // Check scheduled episode
+      if (this.episodeCounter >= this.nextEpisodeGame) {
+        this.startEpisode();
+        return;
+      }
+      // Check scheduled normal CZ
+      if (this.czCounter >= this.nextCzGame) {
+        this.startCZ('standard');
+        return;
+      }
+      // Check scheduled AT (direct AT) via atCounter
+      if (this.atCounter >= this.nextAtGame) {
+        this.startAT(false);
+        return;
+      }
+      // Otherwise remain in normal state
+    }
+
+    /**
+     * KAKUGAN state boosts rare roles. It expires after a random number of
+     * games. The distribution of durations is 70%:10G, 20%:20G, 8%:30G,
+     * 2%:50G. Counts down each spin.
+     */
+    handleKakugan(role) {
+      this.log(`KAKUGAN: role ${role}, remaining ${this.kakuganRemaining}`);
+      // Reduce remaining counter
+      this.kakuganRemaining--;
+      // When time runs out return to normal
+      if (this.kakuganRemaining <= 0) {
+        this.state = 'NORMAL';
+        // Reset normal triggers to avoid immediate re-entry
+        // (optional: don't reset counters)
+        return;
+      }
+      // Even in KAKUGAN we check triggers but with reduced frequency
+      this.handleNormal(role);
+    }
+
+    /**
+     * Initialise a KAKUGAN period with a random duration drawn from the
+     * distribution described in the specification.
+     */
+    startKakugan() {
+      this.state = 'KAKUGAN';
+      // Distribution: 10G (70%), 20G (20%), 30G (8%), 50G (2%)
+      const durations = { 10: 70, 20: 20, 30: 8, 50: 2 };
+      const chosen = parseInt(pickWeighted(durations, this.rng), 10);
+      this.kakuganRemaining = chosen;
+      this.log(`Enter KAKUGAN for ${chosen} games`);
+    }
+
+    /**
+     * Begin a CZ. Standard CZs are easier to reach but have lower success
+     * expectations, whereas strong CZs occur rarely but provide higher
+     * success rates. Both CZ types have 8 games and accumulate success
+     * probability based on the small roles drawn.
+     * @param {string} type 'standard' or 'strong'
+     */
+    startCZ(type) {
+      this.state = (type === 'strong') ? 'CZ_STRONG' : 'CZ_STANDARD';
+      this.czType = type;
+      this.czRemaining = 8;
+      this.czSuccessChance = (type === 'strong') ? 0.25 : 0.0;
+      this.stats.totalCZ++;
+      if (type === 'strong') this.stats.totalStrongCZ++;
+      // Reset counters and resample next triggers
+      this.czCounter = 0;
+      this.nextCzGame = sampleGeometric(this.currentSetting().czProbability, this.rng);
+      this.strongCzCounter = 0;
+      this.nextStrongCzGame = sampleGeometric(this.currentSetting().strongCzProbability, this.rng);
+      this.episodeCounter = 0;
+      this.nextEpisodeGame = sampleGeometric(this.currentSetting().episodeProbability, this.rng);
+      this.log(`Enter ${type === 'strong' ? 'STRONG CZ' : 'CZ'} (8G)`);
+    }
+
+    /**
+     * Process a CZ game. Each spin builds success chance depending on
+     * the role. When the 8th game concludes we test success and either
+     * enter AT or return to normal.
+     * @param {string} role
+     */
+    handleCZ(role) {
+      this.log(`${this.state}: role ${role}, remaining ${this.czRemaining}`);
+      // Increase success chance based on role and CZ type
+      const incrementsStandard = {
+        replay: 0.0,
+        diagonalBell: 0.05,
+        weakCherry: 0.10,
+        suika: 0.10,
+        chanceA: 0.15,
+        chanceB: 0.15,
+        strongCherry: 0.25,
+        specialSymbol: 0.40,
+        guaranteedCherry: 1.0,
+        lowerReplay: 0.0
+      };
+      const incrementsStrong = {
+        replay: 0.05,
+        diagonalBell: 0.10,
+        weakCherry: 0.20,
+        suika: 0.20,
+        chanceA: 0.30,
+        chanceB: 0.30,
+        strongCherry: 0.50,
+        specialSymbol: 0.70,
+        guaranteedCherry: 1.0,
+        lowerReplay: 0.05
+      };
+      const incMap = this.state === 'CZ_STRONG' ? incrementsStrong : incrementsStandard;
+      this.czSuccessChance += incMap[role] || 0;
+      // Clamp success chance between 0 and 1
+      if (this.czSuccessChance > 1) this.czSuccessChance = 1;
+      // Decrement remaining games
+      this.czRemaining--;
+      if (this.czRemaining <= 0) {
+        // Determine success
+        const success = this.rng.next() < this.czSuccessChance;
+        this.log(`CZ ${success ? 'succeeded' : 'failed'} (chance=${this.czSuccessChance.toFixed(2)})`);
+        if (success) {
+          // 50% of strong CZ successes directly enter hidden upper mode
+          const upper = (this.state === 'CZ_STRONG') && (this.rng.next() < 0.5);
+          this.startAT(upper);
+        } else {
+          // Failure: return to normal and maybe promote mode
+          this.state = 'NORMAL';
+        }
+      }
+    }
+
+    /**
+     * Enter an episode bonus. This always leads to AT after 20 games and
+     * awards difference increases during the bonus. Duration is fixed at 20
+     * games.
+     */
+    startEpisode() {
+      this.state = 'EPISODE';
+      this.episodeRemaining = 20;
+      this.episodeBonus = 0;
+      this.stats.totalEpisode++;
+      // Reset counters and sample next triggers
+      this.czCounter = 0;
+      this.strongCzCounter = 0;
+      this.episodeCounter = 0;
+      this.atCounter = 0;
+      this.nextCzGame = sampleGeometric(this.currentSetting().czProbability, this.rng);
+      this.nextStrongCzGame = sampleGeometric(this.currentSetting().strongCzProbability, this.rng);
+      this.nextEpisodeGame = sampleGeometric(this.currentSetting().episodeProbability, this.rng);
+      this.nextAtGame = sampleGeometric(this.currentSetting().atProbability, this.rng);
+      this.log('Enter EPISODE BONUS (20G)');
+    }
+
+    /**
+     * Process an episode game. Each game counts down to zero; certain roles
+     * award additional difference on the upcoming AT. After 20 games, AT
+     * begins automatically.
+     * @param {string} role
+     */
+    handleEpisode(role) {
+      this.log(`EPISODE: role ${role}, remaining ${this.episodeRemaining}`);
+      // Award extra difference on specific roles
+      const bonusMap = {
+        weakCherry: 10,
+        suika: 10,
+        chanceA: 20,
+        chanceB: 20,
+        strongCherry: 50,
+        specialSymbol: 80,
+        guaranteedCherry: 100
+      };
+      this.episodeBonus += bonusMap[role] || 0;
+      this.episodeRemaining--;
+      if (this.episodeRemaining <= 0) {
+        // Start AT with extra difference
+        this.startAT(false, this.episodeBonus);
+      }
+    }
+
+    /**
+     * Start the AT. The initial difference is drawn from the config's
+     * distribution and any bonus difference carried over from episodes is
+     * added. The parameter `upper` indicates whether the hidden upper mode
+     * should be active from the start.
+     *
+     * @param {boolean} upper
+     * @param {number} bonus
+     */
+    startAT(upper = false, bonus = 0) {
+      this.state = 'AT_MAIN';
+      this.upperMode = upper;
+      this.stats.totalAT++;
+      if (upper) this.stats.totalATUpper++;
+      // Determine initial difference
+      const diffKey = pickWeighted(this.config.atInitDifference, this.rng);
+      const baseDiff = parseInt(diffKey, 10);
+      this.atDifference = baseDiff + bonus;
+      this.difference += this.atDifference;
+      // Reset counters for AT
+      this.atCounter = 0;
+      this.nextAtGame = sampleGeometric(this.currentSetting().atProbability, this.rng);
+      // Schedule first battle
+      this.atGameCounter = 0;
+      this.scheduleNextBattle();
+      // Reset zone and judgment flags
+      this.zoneType = '';
+      this.zoneRemaining = 0;
+      this.judgmentPending = false;
+      this.log(`Enter AT (upper=${upper}) starting diff=${this.atDifference}, bonus=${bonus}`);
+    }
+
+    /**
+     * Schedules the next battle game inside AT using the battle distribution.
+     */
+    scheduleNextBattle() {
+      const dist = this.config.battleDistribution[this.upperMode ? 'D' : 'A'];
+      const key = pickWeighted(dist, this.rng);
+      this.nextBattleGame = parseInt(key, 10);
+    }
+
+    /**
+     * Process the AT main game. Each spin reduces difference and checks for
+     * battle triggers or zone entries. When the difference is exhausted,
+     * judgment is performed.
+     * @param {string} role
+     */
+    handleAT(role) {
+      this.log(`AT: role ${role}, diff=${this.atDifference}, game=${this.atGameCounter}/${this.nextBattleGame}`);
+      this.atGameCounter++;
+      // Decrease difference by base cost per game (~4) but ensure non‑negative
+      const perGameCost = 4;
+      this.atDifference -= perGameCost;
+      if (this.atDifference < 0) this.atDifference = 0;
+      this.difference -= perGameCost;
+      // Apply role bonus while in AT
+      const bonusMap = {
+        weakCherry: 5,
+        suika: 5,
+        chanceA: 10,
+        chanceB: 10,
+        strongCherry: 20,
+        specialSymbol: 30,
+        guaranteedCherry: 50
+      };
+      const bonus = bonusMap[role] || 0;
+      this.atDifference += bonus;
+      this.difference += bonus;
+      // Check if it's time for a battle
+      if (this.atGameCounter >= this.nextBattleGame) {
+        this.startBattle();
+        return;
+      }
+      // Random chance to enter a zone (add on or special). Upper mode makes
+      // zones more frequent.
+      const zoneChance = this.upperMode ? 0.05 : 0.02;
+      if (this.rng.next() < zoneChance) {
+        // Choose zone type based on weighted probabilities
+        const zoneKey = pickWeighted({ addOn: 0.7, special1: 0.2, special2: 0.1 }, this.rng);
+        this.startZone(zoneKey);
+        return;
+      }
+      // Check for hidden upper mode triggers when not already in upper
+      if (!this.upperMode) {
+        const startRate = this.currentSetting().hiddenUpperStart;
+        if (this.rng.next() < startRate) {
+          // Immediately upgrade to upper mode; schedule new battle distribution
+          this.upperMode = true;
+          this.scheduleNextBattle();
+          this.log('Hidden upper mode activated during AT');
+        }
+      }
+      // If difference exhausted, prepare judgment
+      if (this.atDifference <= 0 && !this.judgmentPending) {
+        this.startJudgment();
+      }
+    }
+
+    /**
+     * Start a battle. Determines the opponent based on hidden upper mode
+     * status and assigns a win probability. Winning grants a random amount
+     * of difference and may spawn a zone. Losing does nothing. After
+     * resolution, schedules the next battle.
+     */
+    startBattle() {
+      this.state = 'BATTLE';
+      this.stats.totalBattles++;
+      // Choose enemy: weights skew heavier in normal mode; in upper mode,
+      // stronger foes appear with lower frequency
+      const enemies = this.upperMode
+        ? { weak: 0.20, medium: 0.40, strong: 0.25, boss: 0.15 }
+        : { weak: 0.40, medium: 0.30, strong: 0.20, boss: 0.10 };
+      this.battleEnemy = pickWeighted(enemies, this.rng);
+      // Assign win rates based on spec examples (converted to probabilities)
+      const winRates = {
+        weak: 0.40,
+        medium: 0.47,
+        strong: 0.53,
+        boss: 0.76
+      };
+      this.battleWinRate = winRates[this.battleEnemy] || 0.5;
+      // Immediately determine outcome
+      const won = this.rng.next() < this.battleWinRate;
+      if (won) {
+        this.stats.battleWins++;
+        // Add difference based on enemy difficulty
+        const diffGain = {
+          weak: 30,
+          medium: 50,
+          strong: 100,
+          boss: 200
+        }[this.battleEnemy] || 30;
+        this.atDifference += diffGain;
+        this.difference += diffGain;
+        // Chance to spawn a zone
+        if (this.rng.next() < 0.5) {
+          const zoneKey = pickWeighted({ addOn: 0.6, special1: 0.3, special2: 0.1 }, this.rng);
+          this.startZone(zoneKey);
+          return;
+        }
+      } else {
+        this.stats.battleLosses++;
+      }
+      // Return to AT and schedule next battle
+      this.state = 'AT_MAIN';
+      this.atGameCounter = 0;
+      this.scheduleNextBattle();
+    }
+
+    /**
+     * Start a zone (add‑on or special). Zones add difference and may loop
+     * according to their loop rate. Different zone types have different
+     * ranges of difference gain. After the zone ends, control returns to
+     * AT_MAIN.
+     * @param {string} type 'addOn' | 'special1' | 'special2'
+     */
+    startZone(type) {
+      this.state = 'ZONE';
+      this.zoneType = type;
+      this.zoneRemaining = 1; // first iteration
+      this.stats.totalZones++;
+      this.log(`Enter zone ${type}`);
+    }
+
+    /**
+     * Process the zone. Each iteration adds a random amount of difference
+     * within the zone's min/max range. If the random loop check fails,
+     * exit back to AT. Otherwise loop again. Zones consume no spins in
+     * terms of counters.
+     */
+    handleZone(role) {
+      const z = this.config.zoneTypes[this.zoneType];
+      if (!z) {
+        this.state = 'AT_MAIN';
+        return;
+      }
+      // Add a random amount between min and max
+      const gain = Math.floor(z.min + this.rng.next() * (z.max - z.min + 1));
+      this.atDifference += gain;
+      this.difference += gain;
+      this.log(`Zone ${this.zoneType}: +${gain}`);
+      // Determine if zone continues
+      if (this.rng.next() < z.loopRate) {
+        // Continue zone; immediate next call will process again
+        return;
+      }
+      // Exit zone
+      this.state = 'AT_MAIN';
+    }
+
+    /**
+     * Prepare judgment sequence. A flag is set so that the next spin after
+     * difference exhaustion enters the JUDGMENT state. This design allows
+     * the reel animation to finish before the judgment happens.
+     */
+    startJudgment() {
+      this.judgmentPending = true;
+    }
+
+    /**
+     * Process judgment. A single spin after AT determines whether upper
+     * mode is granted (success) or the machine returns to normal. The
+     * success rate here is arbitrary but configurable via hiddenUpperStart.
+     */
+    handleJudgment(role) {
+      this.log(`JUDGMENT: role ${role}`);
+      // Determine success using current setting's hiddenUpperStart as base
+      const baseRate = this.currentSetting().hiddenUpperStart;
+      const success = this.rng.next() < baseRate;
+      this.stats.totalJudgments++;
+      if (success) {
+        this.stats.judgmentSuccess++;
+        this.startAT(true);
+      } else {
+        // Return to normal after failed judgment
+        this.state = 'NORMAL';
+      }
+      this.judgmentPending = false;
+    }
+
+    /**
+     * Handles the transition from AT when difference hits zero. We set the
+     * machine state to JUDGMENT; the next spin will run handleJudgment.
+     */
+    checkJudgment() {
+      if (this.state === 'AT_MAIN' && this.atDifference <= 0 && !this.judgmentPending) {
+        this.state = 'JUDGMENT';
+      }
+    }
+
+    /**
+     * Save the current machine state into a plain object suitable for
+     * serialisation. This includes the PRNG seed so that the future spins
+     * reproduce identically when loaded. Do not save references to DOM.
+     */
+    serialize() {
+      return {
+        setting: this.setting,
+        debug: this.debug,
+        rngSeed: this.rng.state,
+        state: this.state,
+        mode: this.mode,
+        upperMode: this.upperMode,
+        gameCount: this.gameCount,
+        czCounter: this.czCounter,
+        strongCzCounter: this.strongCzCounter,
+        episodeCounter: this.episodeCounter,
+        atCounter: this.atCounter,
+        nextCzGame: this.nextCzGame,
+        nextStrongCzGame: this.nextStrongCzGame,
+        nextEpisodeGame: this.nextEpisodeGame,
+        nextAtGame: this.nextAtGame,
+        kakuganRemaining: this.kakuganRemaining,
+        czRemaining: this.czRemaining,
+        czSuccessChance: this.czSuccessChance,
+        czType: this.czType,
+        episodeRemaining: this.episodeRemaining,
+        episodeBonus: this.episodeBonus,
+        atDifference: this.atDifference,
+        difference: this.difference,
+        atGameCounter: this.atGameCounter,
+        nextBattleGame: this.nextBattleGame,
+        zoneType: this.zoneType,
+        zoneRemaining: this.zoneRemaining,
+        judgmentPending: this.judgmentPending,
+        credits: this.credits,
+        stats: this.stats
+      };
+    }
+
+    /**
+     * Load a previously serialised state object. Overwrites the current
+     * machine completely. Should be used with objects created via serialize().
+     * @param {Object} obj
+     */
+    deserialize(obj) {
+      if (!obj) return;
+      this.setting = obj.setting || this.setting;
+      this.debug = !!obj.debug;
+      this.rng = new PRNG(obj.rngSeed || Date.now());
+      this.state = obj.state || 'NORMAL';
+      this.mode = obj.mode || 'A';
+      this.upperMode = !!obj.upperMode;
+      this.gameCount = obj.gameCount || 0;
+      this.czCounter = obj.czCounter || 0;
+      this.strongCzCounter = obj.strongCzCounter || 0;
+      this.episodeCounter = obj.episodeCounter || 0;
+      this.atCounter = obj.atCounter || 0;
+      this.nextCzGame = obj.nextCzGame || sampleGeometric(this.currentSetting().czProbability, this.rng);
+      this.nextStrongCzGame = obj.nextStrongCzGame || sampleGeometric(this.currentSetting().strongCzProbability, this.rng);
+      this.nextEpisodeGame = obj.nextEpisodeGame || sampleGeometric(this.currentSetting().episodeProbability, this.rng);
+      this.nextAtGame = obj.nextAtGame || sampleGeometric(this.currentSetting().atProbability, this.rng);
+      this.kakuganRemaining = obj.kakuganRemaining || 0;
+      this.czRemaining = obj.czRemaining || 0;
+      this.czSuccessChance = obj.czSuccessChance || 0;
+      this.czType = obj.czType || 'standard';
+      this.episodeRemaining = obj.episodeRemaining || 0;
+      this.episodeBonus = obj.episodeBonus || 0;
+      this.atDifference = obj.atDifference || 0;
+      this.difference = obj.difference || 0;
+      this.atGameCounter = obj.atGameCounter || 0;
+      this.nextBattleGame = obj.nextBattleGame || 0;
+      this.zoneType = obj.zoneType || '';
+      this.zoneRemaining = obj.zoneRemaining || 0;
+      this.judgmentPending = !!obj.judgmentPending;
+      this.credits = obj.credits || 0;
+      this.stats = obj.stats || this.stats;
+      // Resample triggers if missing
+      if (!obj.nextBattleGame) {
+        this.scheduleNextBattle();
+      }
+      localStorage.setItem('dg_setting', String(this.setting));
+      localStorage.setItem('dg_debug', this.debug ? '1' : '0');
+      localStorage.setItem('dg_seed', String(this.rng.state));
+    }
+  }
+
+  /* -----------------------------------------------------------------------
+   * UI layer
+   *
+   * The following code binds UI elements to the SlotMachine instance and
+   * handles user interactions. Modals are created dynamically depending on
+   * which menu item is selected. The UI layer is deliberately kept
+   * lightweight so that the core game logic can be easily separated and
+   * modified.
+   */
+  const machine = new SlotMachine(MACHINE_CONFIG);
+
+  // DOM elements
+  const menuBtn = document.getElementById('menu-btn');
+  const modalOverlay = document.getElementById('modal-overlay');
+  const modalContent = document.getElementById('modal-content');
+  const modalTitle = document.getElementById('modal-title');
+  const modalBody = document.getElementById('modal-body');
+  const modalCloseBtn = document.getElementById('modal-close-btn');
+
+  const creditsEl = document.getElementById('credits');
+  const diffEl = document.getElementById('difference');
+  const gameCountEl = document.getElementById('game-count');
+  const debugStateEl = document.getElementById('debug-state');
+  const debugModeEl = document.getElementById('debug-mode');
+
+  const reelEls = [
+    document.querySelector('#reel1 .symbol'),
+    document.querySelector('#reel2 .symbol'),
+    document.querySelector('#reel3 .symbol')
+  ];
+  const logPanel = document.getElementById('log-panel');
+
+  const betBtn = document.getElementById('bet-btn');
+  const leverBtn = document.getElementById('lever-btn');
+  const autoBtn = document.getElementById('auto-btn');
+  const skipBtn = document.getElementById('skip-btn');
+
+  // Video elements. The background video loops according to the current
+  // machine state. The cut‑in video plays short clips for rare roles. The
+  // lcd video layer is reserved for future expansions (e.g., battle
+  // intros or special zones) and remains unused unless explicitly set.
+  const bgVideoEl = document.getElementById('background-video');
+  const cutinVideoEl = document.getElementById('cutin-video');
+  const lcdVideoEl = document.getElementById('lcd-video');
+
+  // Track the current background state to avoid unnecessary reloads.
+  let currentBgState = '';
+
+  /**
+   * Update the background video based on the machine's current state. If the
+   * state maps to a list of video names in the config, a random entry is
+   * selected. Otherwise the DEFAULT list is used. The function uses the
+   * machine's PRNG to ensure reproducible selection when a seed is set.
+   */
+  function updateBackgroundVideo() {
+    const presets = MACHINE_CONFIG.videoPresets?.background || {};
+    const stateKey = machine.state || 'DEFAULT';
+    // Avoid changing video if state hasn't changed
+    if (stateKey === currentBgState) return;
+    currentBgState = stateKey;
+    const list = presets[stateKey] || presets.DEFAULT || [];
+    if (!Array.isArray(list) || list.length === 0) return;
+    // Pick a random video. Use machine.rng if available for determinism.
+    const idx = Math.floor((machine.rng?.next() ?? Math.random()) * list.length);
+    const file = list[idx];
+    // If already playing this file, do nothing
+    if (bgVideoEl.dataset.currentSrc === file) return;
+    bgVideoEl.dataset.currentSrc = file;
+    bgVideoEl.src = 'assets/video/' + file;
+    // Ensure the video loops smoothly; load and play
+    bgVideoEl.load();
+    const playPromise = bgVideoEl.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {/* ignore play errors (e.g., due to user gesture) */});
+    }
+  }
+
+  /**
+   * Play a cut‑in video corresponding to a role. Roles are categorised
+   * into strong, weak and special categories. If the role is not
+   * recognised, no cut‑in will be played. The cut‑in will be hidden
+   * automatically when it finishes playing.
+   *
+   * @param {string} role The role string as returned by the engine
+   */
+  function playCutin(role) {
+    // Determine category based on role
+    let category;
+    switch (role) {
+      case 'strongCherry':
+      case 'guaranteedCherry':
+        category = 'strong';
+        break;
+      case 'specialSymbol':
+        category = 'special';
+        break;
+      case 'weakCherry':
+      case 'suika':
+      case 'diagonalBell':
+      case 'chanceA':
+      case 'chanceB':
+        category = 'weak';
+        break;
+      default:
+        return;
+    }
+    const presets = MACHINE_CONFIG.videoPresets?.cutin || {};
+    const list = presets[category] || [];
+    if (!Array.isArray(list) || list.length === 0) return;
+    // Randomly select a file using machine rng for reproducibility
+    const idx = Math.floor((machine.rng?.next() ?? Math.random()) * list.length);
+    const file = list[idx];
+    // Do not interrupt if a cut‑in is already playing
+    if (!cutinVideoEl.classList.contains('hidden')) return;
+    cutinVideoEl.dataset.currentSrc = file;
+    cutinVideoEl.src = 'assets/video/' + file;
+    cutinVideoEl.classList.remove('hidden');
+    cutinVideoEl.load();
+    const p = cutinVideoEl.play();
+    if (p && typeof p.catch === 'function') {
+      p.catch(() => {/* ignore play errors */});
+    }
+    // Trigger a brief screen shake for strong or special categories
+    if (category === 'strong' || category === 'special') {
+      const lcd = document.getElementById('lcd-container');
+      if (lcd) {
+        lcd.classList.add('shake');
+        setTimeout(() => {
+          lcd.classList.remove('shake');
+        }, 450);
+      }
+    }
+    // When finished, hide again
+    cutinVideoEl.onended = () => {
+      cutinVideoEl.classList.add('hidden');
+      cutinVideoEl.onended = null;
     };
-  };
-  if (el.dataset.base === normalized) {
-    el.classList.remove("hidden");
-    el.classList.add(showClass);
-    safePlayVideo(el);
-    return;
-  }
-  tryLoad();
-}
-function setBgVideo(src) {
-  loadVideoAsset(dom.bgVideo, src, { loop: true, showClass: "visible" });
-}
-function flashLcd() {
-  if (!dom.lcdFrame) return;
-  dom.lcdFrame.classList.remove("flash");
-  void dom.lcdFrame.offsetWidth;
-  dom.lcdFrame.classList.add("flash");
-}
-function applyLcdScene(sceneKey, overrides = {}) {
-  const scene = { ...(LCD_SCENES[sceneKey] || LCD_SCENES.NORMAL_IDLE), ...overrides };
-  runtime.lcdSceneKey = sceneKey;
-  if (dom.lcdTitle) dom.lcdTitle.textContent = scene.title || "STANDBY MODE";
-  if (dom.lcdSubtitle) dom.lcdSubtitle.textContent = scene.subtitle || "";
-  if (dom.lcdBadge) dom.lcdBadge.textContent = scene.badge || "NORMAL";
-  if (dom.lcdFrame) {
-    dom.lcdFrame.classList.remove("theme-normal", "theme-kakugan", "theme-cz", "theme-bonus", "theme-at", "theme-upper", "theme-battle", "theme-frenzy");
-    dom.lcdFrame.classList.add(scene.theme || "theme-normal");
-  }
-  loadVideoAsset(dom.lcdVideo, scene.asset, { loop: !!scene.loop, showClass: "visible" });
-  if (scene.flash !== false) flashLcd();
-}
-function schedulePersistentLcd(delay = 0) {
-  clearTimeout(runtime.lcdTimer);
-  runtime.lcdTimer = setTimeout(() => {
-    runtime.lcdLockUntil = 0;
-    updatePersistentLCD();
-  }, delay);
-}
-function playLcdScene(sceneKey, options = {}) {
-  const duration = options.duration ?? 1400;
-  runtime.lcdLockUntil = Date.now() + duration;
-  applyLcdScene(sceneKey, options);
-  schedulePersistentLcd(duration + 50);
-}
-function updatePersistentLCD() {
-  if (Date.now() < runtime.lcdLockUntil) return;
-  let key = "NORMAL_IDLE";
-  if (state.phase === "NORMAL") key = state.kakuganRemain > 0 ? "NORMAL_KAKUGAN" : "NORMAL_IDLE";
-  else if (state.phase === "PRELUDE") key = state.preludeKind === "CZ" ? "PRELUDE_CZ" : state.preludeKind === "EP" ? "PRELUDE_EP" : "PRELUDE_AT";
-  else if (state.phase === "CZ") key = "CZ_IDLE";
-  else if (state.phase === "EP_BONUS") key = "EP_START";
-  else if (state.phase === "AT") key = state.upperMode ? "AT_UPPER" : "AT_IDLE";
-  else if (state.phase === "BATTLE") key = "BATTLE_ENTRY";
-  else if (state.phase === "FRENZY") {
-    if (state.frenzyType === "NIGHT_RAID") key = "FRENZY_NIGHT_RAID";
-    else if (state.frenzyType === "CENTIPEDE_RUSH") key = "FRENZY_CENTIPEDE_RUSH";
-    else key = "FRENZY_KING_EATER";
-  }
-  applyLcdScene(key, { flash: false, loop: true });
-}
-function maybePlayRareScene(role) {
-  const map = { cherry: "RARE_CHERRY", moon: "RARE_MOON", chance: "RARE_CHANCE", crush: "RARE_CRUSH" };
-  const key = map[role.key];
-  if (!key) return;
-  if (["PRELUDE", "CZ", "EP_BONUS"].includes(state.phase)) return;
-  playLcdScene(key, { duration: role.key === "crush" ? 1650 : 900, loop: false });
-}
-
-function safePlayVideo(el) {
-  if (!el) return;
-  const p = el.play();
-  if (p && typeof p.catch === "function") p.catch(() => {});
-}
-
-function triggerFx(kind = "flash") {
-  const target = kind === "glitch" ? dom.fxGlitch : dom.fxFlash;
-  if (!target) return;
-  target.classList.remove("active");
-  void target.offsetWidth;
-  target.classList.add("active");
-}
-
-function playCutin(key) {
-  const src = CUTIN_ASSETS[key];
-  if (!dom.cutinVideo || !src) {
-    triggerFx(key === "upper" || key === "through" ? "glitch" : "flash");
-    return;
-  }
-  loadVideoAsset(dom.cutinVideo, src, { loop: false, showClass: "visible" });
-  clearTimeout(runtime.fxTimer);
-  runtime.fxTimer = setTimeout(() => {
-    if (!dom.cutinVideo) return;
-    dom.cutinVideo.pause();
-    dom.cutinVideo.classList.add("hidden");
-    dom.cutinVideo.classList.remove("visible");
-  }, 1700);
-}
-
-function updateCinematicByPhase() {
-  const scene = CINEMATIC_SCENES[state.phase] || CINEMATIC_SCENES.NORMAL;
-  if (dom.machineGlow) {
-    dom.machineGlow.classList.remove("anger", "purple", "gold");
-    dom.machineGlow.classList.add(scene.tone);
-  }
-  setBgVideo(scene.bg);
-}
-
-function createInitialState(setting = 1) {
-  const state = {
-    version: 1,
-    setting,
-    autoMode: false,
-    autoStopDefault: false,
-    debug: false,
-    credits: 500,
-    totalDiff: 0,
-    normalGames: 0,
-    totalGames: 0,
-    czCount: 0,
-    atCount: 0,
-    epCount: 0,
-    bestShot: 0,
-    mode: pickNextMode(setting),
-    ceiling: 0,
-    kakuganRemain: 0,
-    czPoint: 0,
-    phase: "NORMAL",
-    preludeKind: null,
-    preludeGames: 0,
-    czGamesLeft: 0,
-    czSuccessRate: 0,
-    czForceSuccess: false,
-    epGamesLeft: 0,
-    epBonusAdd: 0,
-    atRemain: 0,
-    atBasePayout: 8,
-    atStartDiff: 0,
-    battlePoint: 0,
-    battleEnemy: null,
-    battleGamesLeft: 0,
-    battleBoost: 0,
-    frenzyType: null,
-    frenzyGamesLeft: 0,
-    upperMode: false,
-    upperMeter: 0,
-    throughStock: 0,
-    throughGrace: 0,
-    upperSeed: false,
-    upperLoopCount: 0,
-    logs: []
-  };
-  state.ceiling = pickCeiling(state.mode);
-  return state;
-}
-
-let state = createInitialState();
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
-}
-
-function randInt(min, max) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function weightedPick(table) {
-  const entries = Object.entries(table);
-  const total = entries.reduce((sum, [, value]) => sum + value, 0);
-  let roll = Math.random() * total;
-  for (const [key, value] of entries) {
-    roll -= value;
-    if (roll <= 0) return key;
-  }
-  return entries[entries.length - 1][0];
-}
-
-function pickNextMode(setting, bonus = 0) {
-  const heavenChance = SETTING_DATA[setting].heaven + bonus;
-  const roll = Math.random();
-  if (roll < heavenChance) return "heaven";
-  if (roll < heavenChance + 0.08) return "prep";
-  if (roll < heavenChance + 0.18) return "chance";
-  if (roll < heavenChance + 0.34) return "C";
-  if (roll < heavenChance + 0.56) return "B";
-  return "A";
-}
-
-function pickCeiling(mode) {
-  return MODE_TABLE[mode][randInt(0, MODE_TABLE[mode].length - 1)];
-}
-
-function seedNextFrontDoor(bonus = 0) {
-  state.mode = pickNextMode(state.setting, bonus);
-  state.ceiling = state.normalGames + pickCeiling(state.mode);
-}
-
-function makeLog(text, type = "") {
-  state.logs.unshift({ text, type });
-  state.logs = state.logs.slice(0, MAX_LOG);
-}
-
-function randomDecorSymbol(exclude) {
-  const options = SYMBOL_POOL.filter((s) => s !== exclude);
-  return options[randInt(0, options.length - 1)];
-}
-
-function randomThree(center) {
-  return [randomDecorSymbol(center), center, randomDecorSymbol(center)];
-}
-
-function buildReelsForRole(roleKey) {
-  if (roleKey === "blank") {
-    return Array.from({ length: 3 }, () => [randomDecorSymbol(""), randomDecorSymbol(""), randomDecorSymbol("")]);
-  }
-  const icon = ROLES[roleKey].icon;
-  return [randomThree(icon), randomThree(icon), randomThree(icon)];
-}
-
-function renderSingleReel(index, symbols) {
-  runtime.reelViews[index] = symbols;
-  dom.reels[index].innerHTML = symbols
-    .map((symbol, row) => {
-      const label = row === 1 ? findRoleLabelByIcon(symbol) : "";
-      return `<div class="symbol-cell">${symbol}${label ? `<span class="symbol-label">${label}</span>` : ""}</div>`;
-    })
-    .join("");
-}
-
-function findRoleLabelByIcon(icon) {
-  const role = Object.values(ROLES).find((item) => item.icon === icon);
-  return role ? role.label : "";
-}
-
-function initReels() {
-  for (let i = 0; i < 3; i += 1) {
-    renderSingleReel(i, [randomDecorSymbol(""), randomDecorSymbol(""), randomDecorSymbol("")]);
-  }
-}
-
-function determineWeightTable() {
-  if (state.phase === "CZ") return ROLE_WEIGHTS.CZ;
-  if (state.phase === "EP_BONUS") return ROLE_WEIGHTS.EP;
-  if (state.phase === "BATTLE") return ROLE_WEIGHTS.BATTLE;
-  if (state.phase === "FRENZY") return ROLE_WEIGHTS.FRENZY;
-  if (state.phase === "AT") {
-    return state.kakuganRemain > 0 ? ROLE_WEIGHTS.AT_EYE : ROLE_WEIGHTS.AT;
-  }
-  return state.kakuganRemain > 0 ? ROLE_WEIGHTS.EYE : ROLE_WEIGHTS.NORMAL;
-}
-
-function generateOutcome() {
-  const roleKey = weightedPick(determineWeightTable());
-  return {
-    role: ROLES[roleKey],
-    reels: buildReelsForRole(roleKey)
-  };
-}
-
-function consumeBet() {
-  if (state.credits < 3) {
-    makeLog("クレジット不足。HOMEからNEW GAMEまたはLOADを実行してください。", "highlight");
-    render();
-    return false;
-  }
-  state.credits -= 3;
-  state.totalDiff -= 3;
-  return true;
-}
-
-function startSpin() {
-  if (runtime.spinning || dom.homeModal.classList.contains("visible")) return;
-  if (!consumeBet()) return;
-
-  state.totalGames += 1;
-  if (["NORMAL", "PRELUDE"].includes(state.phase)) {
-    state.normalGames += 1;
-    if (state.throughGrace > 0) state.throughGrace -= 1;
   }
 
-  runtime.currentOutcome = generateOutcome();
-  runtime.spinning = true;
-  runtime.currentStopIndex = 0;
+  let autoMode = false;
+  let skipMode = false;
+  let autoInterval = null;
 
-  dom.stopBtns.forEach((btn, index) => {
-    btn.disabled = index !== 0;
-  });
-  dom.leverBtn.disabled = true;
-
-  for (let i = 0; i < 3; i += 1) {
-    clearInterval(runtime.intervals[i]);
-    runtime.intervals[i] = setInterval(() => {
-      const reelSymbols = [randomDecorSymbol(""), randomDecorSymbol(""), randomDecorSymbol("")];
-      renderSingleReel(i, reelSymbols);
-    }, 70 + i * 12);
-  }
-
-  if (state.autoMode || state.autoStopDefault) {
-    queueAutoStops();
-  }
-
-  render();
-}
-
-function queueAutoStops() {
-  clearTimeout(runtime.autoTimer);
-  runtime.autoTimer = setTimeout(() => stopReel(0), 320);
-  setTimeout(() => stopReel(1), 620);
-  setTimeout(() => stopReel(2), 920);
-}
-
-function stopReel(index) {
-  if (!runtime.spinning || runtime.currentStopIndex !== index) return;
-  clearInterval(runtime.intervals[index]);
-  renderSingleReel(index, runtime.currentOutcome.reels[index]);
-  dom.stopBtns[index].disabled = true;
-  runtime.currentStopIndex += 1;
-
-  if (index < 2) {
-    dom.stopBtns[index + 1].disabled = false;
-  } else {
-    finalizeSpin();
-  }
-}
-
-function finalizeSpin() {
-  runtime.spinning = false;
-  dom.leverBtn.disabled = false;
-  dom.stopBtns.forEach((btn) => (btn.disabled = true));
-  const outcome = runtime.currentOutcome;
-  let payout = outcome.role.payout;
-
-  if (state.phase === "NORMAL") {
-    payout += processNormalPhase(outcome.role);
-  } else if (state.phase === "PRELUDE") {
-    payout += processPreludePhase(outcome.role);
-  } else if (state.phase === "CZ") {
-    payout += processCzPhase(outcome.role);
-  } else if (state.phase === "EP_BONUS") {
-    payout += processEpPhase(outcome.role);
-  } else if (state.phase === "AT") {
-    payout += processAtPhase(outcome.role);
-  } else if (state.phase === "BATTLE") {
-    payout += processBattlePhase(outcome.role);
-  } else if (state.phase === "FRENZY") {
-    payout += processFrenzyPhase(outcome.role);
-  }
-
-  state.credits += payout;
-  maybePlayRareScene(outcome.role);
-  maybeExpireKakugan();
-  autoSave();
-  render();
-
-  if (state.autoMode && !dom.homeModal.classList.contains("visible")) {
-    clearTimeout(runtime.autoTimer);
-    runtime.autoTimer = setTimeout(() => startSpin(), 650);
-  }
-}
-
-function maybeExpireKakugan() {
-  if (["NORMAL", "PRELUDE", "AT", "BATTLE", "FRENZY"].includes(state.phase) && state.kakuganRemain > 0) {
-    state.kakuganRemain -= 1;
-    if (state.kakuganRemain === 0) {
-      makeLog("赫眼終了。静寂が戻る。", "");
-    }
-  }
-}
-
-function enterKakugan(extra = null) {
-  const length = extra || weightedPick({ 10: 70, 20: 20, 30: 8, 50: 2 });
-  state.kakuganRemain = Math.max(state.kakuganRemain, Number(length));
-  makeLog(`赫眼突入 ${length}G。レア役密度が上昇。`, "highlight");
-  playCutin("kakugan");
-  playLcdScene("NORMAL_KAKUGAN", { duration: 1400, loop: false });
-}
-
-function startPrelude(kind, games = 3) {
-  state.phase = "PRELUDE";
-  state.preludeKind = kind;
-  state.preludeGames = games;
-  const label = kind === "CZ" ? "BLOOD GATE" : kind === "EP" ? "ECLIPSE BONUS" : "DEVOUR RUSH";
-  makeLog(`${label} 前兆開始。`, "highlight");
-  triggerFx(kind === "CZ" ? "glitch" : "flash");
-  playLcdScene(kind === "CZ" ? "PRELUDE_CZ" : kind === "EP" ? "PRELUDE_EP" : "PRELUDE_AT", { duration: 1200, loop: false });
-}
-
-function enterCz(initialRate = 28) {
-  state.phase = "CZ";
-  state.preludeKind = null;
-  state.preludeGames = 0;
-  state.czGamesLeft = 8;
-  state.czSuccessRate = clamp(initialRate, 10, 92);
-  state.czForceSuccess = false;
-  state.czCount += 1;
-  makeLog(`CZ「BLOOD GATE」突入。成功期待度 ${state.czSuccessRate.toFixed(0)}%`, "highlight");
-  playCutin("cz");
-  playLcdScene("CZ_IDLE", { duration: 1400, loop: false });
-}
-
-function enterEpBonus() {
-  state.phase = "EP_BONUS";
-  state.preludeKind = null;
-  state.preludeGames = 0;
-  state.epGamesLeft = 20;
-  state.epBonusAdd = 0;
-  state.epCount += 1;
-  makeLog("ECLIPSE BONUS突入。消化後AT確定。", "highlight");
-  playCutin("ep");
-  playLcdScene("EP_START", { duration: 1600, loop: false });
-}
-
-function startAT(base, reason = "") {
-  state.phase = "AT";
-  state.atCount += 1;
-  state.atRemain = base;
-  state.atBasePayout = state.upperMode ? 10 : 8;
-  state.atStartDiff = state.totalDiff;
-  state.battlePoint = 0;
-  state.battleEnemy = null;
-  state.battleGamesLeft = 0;
-  state.battleBoost = 0;
-  state.frenzyType = null;
-  state.frenzyGamesLeft = 0;
-  state.czGamesLeft = 0;
-  state.czSuccessRate = 0;
-  state.epGamesLeft = 0;
-  state.epBonusAdd = 0;
-  state.normalGames = 0;
-  state.czPoint = 0;
-  state.upperMeter = 0;
-  seedNextFrontDoor(state.throughStock > 0 ? 0.25 : 0);
-
-  if (state.throughStock > 0 || state.upperSeed) {
-    state.upperMode = true;
-    state.upperLoopCount += 1;
-    state.atRemain += 120;
-    if (state.throughStock > 0) state.throughStock -= 1;
-    state.upperSeed = false;
-    makeLog("貫き発動。上位ATを引き継いで再突入。", "win");
-    playCutin("through");
-    playLcdScene("THROUGH_ENTER", { duration: 1800, loop: false });
-  }
-
-  makeLog(`AT「DEVOUR RUSH」開始 +${base}枚${reason ? ` / ${reason}` : ""}`, "win");
-  playCutin("at");
-  playLcdScene(state.upperMode ? "AT_UPPER" : "AT_START", { duration: 1700, loop: false });
-}
-
-function startBattle() {
-  state.phase = "BATTLE";
-  state.battleGamesLeft = 3;
-  state.battleBoost = 0;
-  const weighted = state.upperMode ? { 0: 20, 1: 32, 2: 30, 3: 18 } : { 0: 40, 1: 30, 2: 20, 3: 10 };
-  const enemyIndex = Number(weightedPick(weighted));
-  state.battleEnemy = ENEMIES[enemyIndex];
-  makeLog(`対決開始: ${state.battleEnemy.name}`, "highlight");
-  playCutin("battle");
-  playLcdScene("BATTLE_ENTRY", { duration: 1600, loop: false, title: `ABYSS BATTLE / ${state.battleEnemy.name}`, subtitle: "敵を撃破して報酬を掴め。" });
-}
-
-function startFrenzy(typeKey) {
-  const frenzy = FRENZY_TYPES[typeKey];
-  state.phase = "FRENZY";
-  state.frenzyType = typeKey;
-  state.frenzyGamesLeft = frenzy.games[randInt(0, frenzy.games.length - 1)];
-  makeLog(`${frenzy.label} 突入。${state.frenzyGamesLeft}G継続。`, "win");
-  playCutin("frenzy");
-  playLcdScene(typeKey === "NIGHT_RAID" ? "FRENZY_NIGHT_RAID" : typeKey === "CENTIPEDE_RUSH" ? "FRENZY_CENTIPEDE_RUSH" : "FRENZY_KING_EATER", { duration: 1800, loop: false });
-}
-
-function enterUpperMode(reason = "") {
-  if (state.upperMode) return;
-  state.upperMode = true;
-  state.upperMeter = 0;
-  state.atRemain += 180;
-  makeLog(`上位モード「CROWN ECLIPSE」突入${reason ? ` / ${reason}` : ""}`, "win");
-  playCutin("upper");
-  playLcdScene("UPPER_ENTER", { duration: 1900, loop: false });
-}
-
-function endAT() {
-  const shot = state.totalDiff - state.atStartDiff;
-  state.bestShot = Math.max(state.bestShot, shot);
-  const throughCondition = state.upperMode && (shot >= 1500 || Math.random() < 0.68);
-
-  if (throughCondition) {
-    state.phase = "NORMAL";
-    state.upperMode = false;
-    state.kakuganRemain = 0;
-    state.throughStock = clamp(state.throughStock + 1, 0, 2);
-    state.throughGrace = 80;
-    state.upperSeed = true;
-    state.normalGames = 0;
-    state.mode = "heaven";
-    state.ceiling = pickCeiling("heaven");
-    state.czPoint = 35;
-    makeLog(`AT終了後、貫き待機へ移行。一撃 ${shot}枚 / 次回上位優遇。`, "win");
-    return;
-  }
-
-  state.phase = "NORMAL";
-  state.upperMode = false;
-  state.kakuganRemain = 0;
-  state.upperSeed = false;
-  state.throughGrace = 0;
-  state.normalGames = 0;
-  state.czPoint = 0;
-  state.mode = pickNextMode(state.setting);
-  state.ceiling = pickCeiling(state.mode);
-  makeLog(`AT終了。一撃 ${shot}枚。通常へ。`, shot >= 800 ? "highlight" : "");
-  playLcdScene("AT_END", { duration: 1000, loop: false, subtitle: `一撃 ${shot}枚。次の当たりへ。` });
-}
-
-function processNormalPhase(role) {
-  let extraPayout = 0;
-  const setting = SETTING_DATA[state.setting];
-
-  if (role.key === "eye") enterKakugan();
-  if (role.key === "crush" && Math.random() < 0.2) enterKakugan(20);
-
-  const rarePointTable = {
-    cherry: 10,
-    moon: 18,
-    chance: 28,
-    crush: 40
-  };
-  if (rarePointTable[role.key]) {
-    const boost = state.kakuganRemain > 0 ? 1.35 : 1;
-    state.czPoint += Math.floor(rarePointTable[role.key] * boost);
-    state.upperMeter += Math.floor(rarePointTable[role.key] * 0.35);
-  }
-
-  if (state.throughGrace > 0 && (role.key === "chance" || role.key === "crush" || state.normalGames >= 18)) {
-    startPrelude(Math.random() < 0.45 ? "EP" : "AT", 2);
-    state.throughGrace = 0;
-    return extraPayout;
-  }
-
-  if (role.key === "crush" && Math.random() < 0.12 * setting.ep) {
-    startPrelude("EP", 3);
-    seedNextFrontDoor(0.06);
-    return extraPayout;
-  }
-
-  if ((role.key === "chance" || role.key === "crush") && Math.random() < 0.06 * setting.at * (state.upperSeed ? 3 : 1)) {
-    startPrelude("AT", 2);
-    seedNextFrontDoor(0.12);
-    return extraPayout;
-  }
-
-  if (state.czPoint >= 100 || (role.key !== "blank" && Math.random() < 0.015 * setting.cz * (state.kakuganRemain > 0 ? 2.2 : 1))) {
-    startPrelude(Math.random() < 0.22 * setting.ep ? "EP" : "CZ", state.kakuganRemain > 0 ? 2 : 3);
-    state.czPoint = Math.max(0, state.czPoint - 80);
-    seedNextFrontDoor(0.04);
-    return extraPayout;
-  }
-
-  if (state.normalGames >= state.ceiling) {
-    startPrelude(state.upperSeed || state.throughStock > 0 ? "EP" : "CZ", 2);
-    state.czPoint = Math.max(30, state.czPoint);
-    seedNextFrontDoor(0.08);
-    return extraPayout;
-  }
-
-  return extraPayout;
-}
-
-function processPreludePhase(role) {
-  let extraPayout = 0;
-  const isRare = ["cherry", "moon", "chance", "crush"].includes(role.key);
-  if (role.key === "eye") enterKakugan(20);
-
-  if (isRare) {
-    state.preludeGames -= role.key === "crush" ? 2 : 1;
-    if (state.preludeKind === "CZ" && (role.key === "chance" || role.key === "crush") && Math.random() < 0.45) {
-      state.preludeKind = "EP";
-      makeLog("前兆昇格。ECLIPSE BONUSへ。", "highlight");
-    }
-  } else {
-    state.preludeGames -= 1;
-  }
-
-  if (state.preludeGames <= 0) {
-    if (state.preludeKind === "CZ") {
-      enterCz(28 + state.czPoint * 0.2 + state.kakuganRemain * 0.35);
-    } else if (state.preludeKind === "EP") {
-      enterEpBonus();
-    } else {
-      startAT(randInt(160, 280), "直AT");
+  /**
+   * Update the top bar counters and debug information.
+   */
+  function updateStatusDisplay() {
+    creditsEl.textContent = machine.credits;
+    diffEl.textContent = machine.difference;
+    gameCountEl.textContent = machine.gameCount;
+    if (machine.debug) {
+      debugStateEl.textContent = machine.state;
+      debugModeEl.textContent = machine.mode;
     }
   }
 
-  return extraPayout;
-}
-
-function processCzPhase(role) {
-  let extraPayout = 0;
-  const addTable = { bell: 10, cherry: 18, moon: 25, chance: 40, crush: 65, replay: 2 };
-  state.czGamesLeft -= 1;
-  state.czSuccessRate += addTable[role.key] || 0;
-
-  if (role.key === "crush") {
-    state.czForceSuccess = true;
-    makeLog("強レア役成立。CZ成功濃厚。", "win");
-  }
-  if (role.key === "eye") enterKakugan(20);
-
-  if (state.czGamesLeft <= 0) {
-    const successRate = clamp(state.czSuccessRate * 0.44 * SETTING_DATA[state.setting].cz, 5, 97);
-    if (state.czForceSuccess || Math.random() * 100 < successRate) {
-      playLcdScene("CZ_SUCCESS", { duration: 1400, loop: false });
-      startAT(randInt(180, 300), "CZ成功");
-    } else {
-      state.phase = "NORMAL";
-      state.czGamesLeft = 0;
-      state.czSuccessRate = 0;
-      state.czForceSuccess = false;
-      makeLog(`CZ失敗。通常へ。`, "");
-      playLcdScene("CZ_FAIL", { duration: 1100, loop: false });
+  /**
+   * Render the latest role into the three reel slots. Since our simulator
+   * condenses stopping into a single action, all reels show the same symbol.
+   * In a more detailed implementation each reel could spin individually.
+   */
+  function updateReels(role) {
+    const symbol = ROLE_SYMBOLS[role] || '-';
+    for (const el of reelEls) {
+      el.textContent = symbol;
     }
   }
 
-  return extraPayout;
-}
-
-function processEpPhase(role) {
-  let extraPayout = 5;
-  const addTable = { bell: 0, replay: 0, cherry: 20, moon: 40, chance: 80, crush: 150 };
-  state.epGamesLeft -= 1;
-  state.epBonusAdd += addTable[role.key] || 0;
-
-  if (role.key === "eye") enterKakugan(20);
-
-  if (state.epGamesLeft <= 0) {
-    const base = randInt(180, 260) + state.epBonusAdd;
-    startAT(base, "EP BONUS");
-  }
-  return extraPayout;
-}
-
-function maybeTriggerUpper(role) {
-  if (state.upperMode) return;
-  const meterAdd = { cherry: 10, moon: 18, chance: 32, crush: 55 };
-  state.upperMeter += meterAdd[role.key] || 0;
-  const threshold = 170 / SETTING_DATA[state.setting].upper;
-  if (state.upperMeter >= threshold || (role.key === "crush" && Math.random() < 0.12 * SETTING_DATA[state.setting].upper)) {
-    enterUpperMode("覚醒連鎖");
-  }
-}
-
-function maybeStartFrenzyByRole(role) {
-  if (role.key === "crush") {
-    startFrenzy(weightedPick(state.upperMode ? { KING_EATER: 45, CENTIPEDE_RUSH: 35, NIGHT_RAID: 20 } : { CENTIPEDE_RUSH: 45, NIGHT_RAID: 40, KING_EATER: 15 }));
-    return true;
-  }
-  if (role.key === "chance" && Math.random() < (state.upperMode ? 0.22 : 0.08)) {
-    startFrenzy(weightedPick({ NIGHT_RAID: 50, CENTIPEDE_RUSH: 35, KING_EATER: 15 }));
-    return true;
-  }
-  return false;
-}
-
-function processAtPhase(role) {
-  let extraPayout = state.upperMode ? 10 : 8;
-  state.atRemain -= state.upperMode ? 10 : 8;
-  const pointTable = { bell: 12, replay: 2, cherry: 24, moon: 38, chance: 56, crush: 92, eye: 8 };
-  state.battlePoint += pointTable[role.key] || 0;
-
-  if (role.key === "eye") enterKakugan(state.upperMode ? 30 : 20);
-  if (state.kakuganRemain > 0 && ["cherry", "moon", "chance", "crush"].includes(role.key)) {
-    state.battlePoint += 22;
-    state.upperMeter += 8;
-  }
-
-  maybeTriggerUpper(role);
-
-  if (maybeStartFrenzyByRole(role)) {
-    return extraPayout;
-  }
-
-  const battleThreshold = state.upperMode ? 85 : 110;
-  if (state.battlePoint >= battleThreshold) {
-    state.battlePoint = Math.max(0, state.battlePoint - battleThreshold);
-    startBattle();
-    return extraPayout;
-  }
-
-  if (state.atRemain <= 0) {
-    endAT();
-  }
-
-  return extraPayout;
-}
-
-function processBattlePhase(role) {
-  let extraPayout = state.upperMode ? 12 : 10;
-  state.atRemain -= state.upperMode ? 10 : 8;
-  const boostTable = { bell: 10, replay: 0, cherry: 18, moon: 28, chance: 45, crush: 70, eye: 5 };
-  state.battleBoost += boostTable[role.key] || 0;
-  state.battleGamesLeft -= 1;
-
-  if (role.key === "eye") enterKakugan(20);
-
-  if (state.battleGamesLeft <= 0) {
-    const finalRate = clamp(state.battleEnemy.win + state.battleBoost * 0.42 + (state.upperMode ? 14 : 0), 12, 99);
-    if (Math.random() * 100 < finalRate) {
-      const rewardRoll = state.upperMode
-        ? weightedPick({ small: 30, medium: 35, large: 20, frenzy: 15 })
-        : weightedPick({ small: 40, medium: 35, large: 15, frenzy: 10 });
-      if (rewardRoll === "small") {
-        const add = randInt(40, 80);
-        state.atRemain += add;
-        makeLog(`${state.battleEnemy.name} 撃破。+${add}枚`, "win");
-        playLcdScene("BATTLE_WIN", { duration: 1000, loop: false, subtitle: `+${add}枚上乗せ。追撃に期待。` });
-      } else if (rewardRoll === "medium") {
-        const add = randInt(90, 180);
-        state.atRemain += add;
-        makeLog(`${state.battleEnemy.name} 撃破。+${add}枚`, "win");
-        playLcdScene("BATTLE_WIN", { duration: 1150, loop: false, subtitle: `+${add}枚上乗せ。さらに伸ばせ。` });
-      } else if (rewardRoll === "large") {
-        const add = randInt(220, 420);
-        state.atRemain += add;
-        makeLog(`${state.battleEnemy.name} 撃破。大上乗せ +${add}枚`, "win");
-        playLcdScene("BATTLE_WIN", { duration: 1300, loop: false, subtitle: `大上乗せ +${add}枚。波が来ている。` });
-      } else {
-        startFrenzy(weightedPick(state.upperMode ? { KING_EATER: 50, CENTIPEDE_RUSH: 35, NIGHT_RAID: 15 } : { CENTIPEDE_RUSH: 42, NIGHT_RAID: 40, KING_EATER: 18 }));
-        state.battleEnemy = null;
-        state.battleGamesLeft = 0;
-        state.battleBoost = 0;
-        return extraPayout;
-      }
-    } else {
-      makeLog(`${state.battleEnemy.name} に敗北。AT継続。`, "");
-      playLcdScene("BATTLE_LOSE", { duration: 900, loop: false, subtitle: "敗北後もAT継続。巻き返しへ。" });
-    }
-    state.phase = "AT";
-    state.battleEnemy = null;
-    state.battleGamesLeft = 0;
-    state.battleBoost = 0;
-    if (state.atRemain <= 0) endAT();
-  }
-
-  return extraPayout;
-}
-
-function processFrenzyPhase(role) {
-  let extraPayout = state.upperMode ? 12 : 10;
-  const frenzy = FRENZY_TYPES[state.frenzyType];
-  const baseAdd = randInt(frenzy.addMin, frenzy.addMax);
-  const roleBoost = { cherry: 15, moon: 25, chance: 50, crush: 120 }[role.key] || 0;
-  const add = baseAdd + roleBoost + (state.upperMode ? 25 : 0);
-
-  state.atRemain += add;
-  state.frenzyGamesLeft -= 1;
-  makeLog(`${frenzy.label} +${add}枚`, "win");
-  playLcdScene(state.frenzyType === "NIGHT_RAID" ? "FRENZY_NIGHT_RAID" : state.frenzyType === "CENTIPEDE_RUSH" ? "FRENZY_CENTIPEDE_RUSH" : "FRENZY_KING_EATER", { duration: 850, loop: false, subtitle: `${frenzy.label} +${add}枚` });
-
-  if (role.key === "eye") enterKakugan(20);
-  if (role.key === "crush" && state.frenzyType !== "KING_EATER" && Math.random() < 0.25) {
-    startFrenzy("KING_EATER");
-    return extraPayout;
-  }
-
-  if (state.frenzyGamesLeft <= 0) {
-    state.phase = "AT";
-    state.frenzyType = null;
-    state.frenzyGamesLeft = 0;
-  }
-  return extraPayout;
-}
-
-function renderLogs() {
-  dom.eventLog.innerHTML = state.logs
-    .map((item) => `<div class="log-item ${item.type || ""}">${item.text}</div>`)
-    .join("");
-}
-
-function formatDiff(num) {
-  return `${num >= 0 ? "+" : ""}${num}`;
-}
-
-function renderFlags() {
-  dom.flagMode.textContent = `MODE ${state.mode.toUpperCase()}`;
-  dom.flagKakugan.textContent = `EYE ${state.kakuganRemain}G`;
-  dom.flagKakugan.className = `status-pill ${state.kakuganRemain > 0 ? "active-eye" : "off"}`;
-  dom.flagUpper.textContent = state.upperMode ? `UPPER ON` : state.upperSeed ? `UPPER SEED` : "UPPER OFF";
-  dom.flagUpper.className = `status-pill ${state.upperMode || state.upperSeed ? "active-upper" : "off"}`;
-  dom.flagThrough.textContent = `THROUGH ${state.throughStock}`;
-  dom.flagThrough.className = `status-pill ${state.throughStock > 0 ? "active-upper" : "off"}`;
-}
-
-function renderScreen() {
-  dom.phaseLabel.textContent = PHASE_LABELS[state.phase];
-  if (state.phase === "NORMAL") {
-    dom.screenSmall.textContent = state.upperSeed ? "THROUGH STANDBY" : "NORMAL STATE";
-    dom.screenBig.textContent = state.kakuganRemain > 0 ? "SCARLET EYE" : "PRESS LEVER";
-    dom.screenMid.textContent = state.upperSeed
-      ? `上位継承待機。${state.ceiling}G以内の当選に期待。`
-      : `天井まであと ${Math.max(0, state.ceiling - state.normalGames)}G / CZポイント ${state.czPoint}`;
-  } else if (state.phase === "PRELUDE") {
-    dom.screenSmall.textContent = "PRELUDE";
-    dom.screenBig.textContent = state.preludeKind === "CZ" ? "BLOOD GATE" : state.preludeKind === "EP" ? "ECLIPSE BONUS" : "DEVOUR RUSH";
-    dom.screenMid.textContent = `発展まで残り ${state.preludeGames}G`;
-  } else if (state.phase === "CZ") {
-    dom.screenSmall.textContent = "CZ";
-    dom.screenBig.textContent = "BLOOD GATE";
-    dom.screenMid.textContent = `残り ${state.czGamesLeft}G / 成功期待 ${Math.floor(clamp(state.czSuccessRate * 0.44, 0, 99))}%`;
-  } else if (state.phase === "EP_BONUS") {
-    dom.screenSmall.textContent = "BONUS";
-    dom.screenBig.textContent = "ECLIPSE BONUS";
-    dom.screenMid.textContent = `残り ${state.epGamesLeft}G / AT上乗せ ${state.epBonusAdd}枚`;
-  } else if (state.phase === "AT") {
-    dom.screenSmall.textContent = state.upperMode ? "UPPER AT" : "AT";
-    dom.screenBig.textContent = state.upperMode ? "CROWN ECLIPSE" : "DEVOUR RUSH";
-    dom.screenMid.textContent = `残差枚 ${Math.max(0, state.atRemain)} / バトルpt ${state.battlePoint}`;
-  } else if (state.phase === "BATTLE") {
-    dom.screenSmall.textContent = "BATTLE";
-    dom.screenBig.textContent = state.battleEnemy?.name || "ABYSS BATTLE";
-    dom.screenMid.textContent = `残り ${state.battleGamesLeft}G / ブースト ${state.battleBoost}`;
-  } else if (state.phase === "FRENZY") {
-    dom.screenSmall.textContent = "FRENZY";
-    dom.screenBig.textContent = FRENZY_TYPES[state.frenzyType]?.label || "FRENZY ZONE";
-    dom.screenMid.textContent = `残り ${state.frenzyGamesLeft}G`;
-  }
-}
-
-function renderStats() {
-  dom.creditValue.textContent = state.credits;
-  dom.totalDiff.textContent = formatDiff(state.totalDiff);
-  dom.atRemain.textContent = Math.max(0, Math.floor(state.atRemain));
-  dom.normalGames.textContent = state.normalGames;
-  dom.totalGames.textContent = state.totalGames;
-  dom.czCount.textContent = state.czCount;
-  dom.atCount.textContent = state.atCount;
-  dom.epCount.textContent = state.epCount;
-  dom.bestShot.textContent = state.bestShot;
-  dom.settingBadge.textContent = `設定${state.setting}`;
-  dom.modeReadout.textContent = state.mode.toUpperCase();
-  dom.preReadout.textContent = state.phase === "PRELUDE" ? `${state.preludeKind} ${state.preludeGames}G` : "-";
-  dom.czPoint.textContent = Math.floor(state.czPoint);
-  dom.ceilingReadout.textContent = `${Math.max(0, state.ceiling - state.normalGames)}G`;
-  dom.upperReadout.textContent = state.upperMode ? "ACTIVE" : state.upperSeed ? "SEED" : "OFF";
-  dom.throughReadout.textContent = state.throughStock;
-  dom.debugBadge.textContent = state.debug ? "詳細表示中" : "演出モード";
-  dom.autoBtn.textContent = state.autoMode ? "AUTO ON" : "AUTO OFF";
-  renderFlags();
-  renderScreen();
-  updateCinematicByPhase();
-  updatePersistentLCD();
-  renderLogs();
-}
-
-function renderHomeSettingGrid() {
-  dom.settingGrid.innerHTML = "";
-  for (let i = 1; i <= 6; i += 1) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `setting-option ${state.setting === i ? "active" : ""}`;
-    button.innerHTML = `<span>設定</span><strong>${i}</strong>`;
-    button.addEventListener("click", () => {
-      state.setting = i;
-      autoSave();
-      render();
-      renderHomeSettingGrid();
+  /**
+   * Append a log line to the debug log panel.
+   */
+  function appendLogLines() {
+    if (!machine.debug) return;
+    logPanel.innerHTML = '';
+    machine.logLines.forEach(line => {
+      const div = document.createElement('div');
+      div.textContent = line;
+      logPanel.appendChild(div);
     });
-    dom.settingGrid.appendChild(button);
+    // Scroll to bottom
+    logPanel.scrollTop = logPanel.scrollHeight;
   }
-  dom.autoStopDefault.checked = !!state.autoStopDefault;
-}
 
-function render() {
-  renderStats();
-  renderHomeSettingGrid();
-}
-
-function sanitizeLoadedState(raw) {
-  const base = createInitialState(Number(raw.setting) || 1);
-  const merged = { ...base, ...raw };
-  merged.setting = clamp(Number(merged.setting) || 1, 1, 6);
-  merged.logs = Array.isArray(merged.logs) ? merged.logs.slice(0, MAX_LOG) : [];
-  merged.phase = ["NORMAL", "PRELUDE", "CZ", "EP_BONUS", "AT", "BATTLE", "FRENZY"].includes(merged.phase) ? merged.phase : "NORMAL";
-  return merged;
-}
-
-function autoSave() {
-  const payload = { ...state };
-  try {
-    localStorage.setItem(SAVE_KEY, JSON.stringify(payload));
-  } catch (error) {
-    console.error(error);
-  }
-}
-
-function loadFromLocalStorage() {
-  const raw = localStorage.getItem(SAVE_KEY);
-  if (!raw) return null;
-  try {
-    return sanitizeLoadedState(JSON.parse(raw));
-  } catch (error) {
-    console.error(error);
-    return null;
-  }
-}
-
-function applyLoadedState(nextState) {
-  state = sanitizeLoadedState(nextState);
-  clearAllRuntime();
-  initReels();
-  render();
-}
-
-function clearAllRuntime() {
-  runtime.spinning = false;
-  runtime.currentOutcome = null;
-  runtime.currentStopIndex = 0;
-  runtime.intervals.forEach((interval, index) => {
-    clearInterval(interval);
-    runtime.intervals[index] = null;
-  });
-  clearTimeout(runtime.autoTimer);
-  clearTimeout(runtime.fxTimer);
-  clearTimeout(runtime.lcdTimer);
-  if (dom.cutinVideo) { dom.cutinVideo.pause(); dom.cutinVideo.classList.add("hidden"); dom.cutinVideo.classList.remove("visible"); }
-  dom.leverBtn.disabled = false;
-  dom.stopBtns.forEach((btn) => (btn.disabled = true));
-}
-
-function exportSaveData() {
-  const text = btoa(unescape(encodeURIComponent(JSON.stringify(state))));
-  dom.saveText.value = text;
-  makeLog("セーブデータを書き出しました。", "highlight");
-  render();
-}
-
-function importOrLoadSave() {
-  const text = dom.saveText.value.trim();
-  if (text) {
-    try {
-      const decoded = decodeURIComponent(escape(atob(text)));
-      applyLoadedState(JSON.parse(decoded));
-      autoSave();
-      makeLog("テキストからセーブを読み込みました。", "highlight");
-      render();
-      return;
-    } catch (error) {
-      makeLog("セーブ文字列の読み込みに失敗しました。", "highlight");
-      render();
-      return;
+  /**
+   * Perform a single spin: call machine.spin and update UI. If auto mode
+   * is enabled, schedule the next spin automatically.
+   */
+  function performSpin() {
+    // Perform the core spin
+    const result = machine.spin();
+    // Update UI elements
+    updateReels(result.role);
+    updateStatusDisplay();
+    appendLogLines();
+    // Trigger cut‑ins for certain roles
+    playCutin(result.role);
+    // Update background video if the state changed
+    updateBackgroundVideo();
+    // If we just exhausted AT difference and have pending judgment
+    if (machine.judgmentPending && machine.state === 'AT_MAIN' && machine.atDifference <= 0) {
+      machine.state = 'JUDGMENT';
+    }
+    // Auto mode scheduling
+    if (autoMode) {
+      const delay = skipMode ? 10 : 300; // ms between spins
+      clearTimeout(autoInterval);
+      autoInterval = setTimeout(performSpin, delay);
     }
   }
-  const loaded = loadFromLocalStorage();
-  if (loaded) {
-    applyLoadedState(loaded);
-    makeLog("ローカルセーブを読み込みました。", "highlight");
-  } else {
-    makeLog("保存データがありません。", "highlight");
-  }
-  render();
-}
 
-function newGame() {
-  state = createInitialState(state.setting);
-  state.autoStopDefault = dom.autoStopDefault.checked;
-  state.logs = [{ text: "新しいセッションを開始しました。", type: "highlight" }];
-  clearAllRuntime();
-  initReels();
-  autoSave();
-  render();
-  closeHomeModal();
-}
-
-function openHomeModal() {
-  dom.homeModal.classList.add("visible");
-}
-
-function closeHomeModal() {
-  dom.homeModal.classList.remove("visible");
-}
-
-function toggleAutoMode() {
-  state.autoMode = !state.autoMode;
-  autoSave();
-  render();
-  if (state.autoMode && !runtime.spinning) {
-    startSpin();
-  }
-}
-
-function bindEvents() {
-  dom.leverBtn.addEventListener("click", startSpin);
-  dom.stopBtns.forEach((btn, index) => btn.addEventListener("click", () => stopReel(index)));
-  dom.autoBtn.addEventListener("click", toggleAutoMode);
-  dom.openHome.addEventListener("click", openHomeModal);
-  dom.closeHome.addEventListener("click", closeHomeModal);
-  dom.newGame.addEventListener("click", newGame);
-  dom.resumeGame.addEventListener("click", () => {
-    const loaded = loadFromLocalStorage();
-    if (loaded) {
-      applyLoadedState(loaded);
-      makeLog("CONTINUEでセーブを読み込みました。", "highlight");
-      render();
+  /**
+   * Toggle auto spin mode. Updates button label accordingly.
+   */
+  function toggleAuto() {
+    autoMode = !autoMode;
+    autoBtn.textContent = autoMode ? 'AUTO ON' : 'AUTO';
+    if (autoMode) {
+      performSpin();
+    } else {
+      clearTimeout(autoInterval);
     }
-    closeHomeModal();
-  });
-  dom.autoStopDefault.addEventListener("change", (event) => {
-    state.autoStopDefault = event.target.checked;
-    autoSave();
-  });
-  dom.saveBtn.addEventListener("click", () => {
-    autoSave();
-    makeLog("手動セーブしました。", "highlight");
-    render();
-  });
-  dom.loadBtn.addEventListener("click", importOrLoadSave);
-  dom.manualSave.addEventListener("click", () => {
-    autoSave();
-    makeLog("手動セーブしました。", "highlight");
-    render();
-  });
-  dom.manualLoad.addEventListener("click", importOrLoadSave);
-  dom.exportSave.addEventListener("click", exportSaveData);
-  dom.resetSave.addEventListener("click", () => {
-    localStorage.removeItem(SAVE_KEY);
-    dom.saveText.value = "";
-    makeLog("保存データを削除しました。", "highlight");
-    render();
-  });
-  dom.toggleDebug.addEventListener("click", () => {
-    state.debug = !state.debug;
-    autoSave();
-    render();
-  });
-  window.addEventListener("keydown", (event) => {
-    if (dom.homeModal.classList.contains("visible")) return;
-    if (event.code === "Space") {
-      event.preventDefault();
-      startSpin();
-    }
-    if (event.code === "Digit1") stopReel(0);
-    if (event.code === "Digit2") stopReel(1);
-    if (event.code === "Digit3") stopReel(2);
-  });
-}
-
-function boot() {
-  const loaded = loadFromLocalStorage();
-  if (loaded) {
-    state = sanitizeLoadedState(loaded);
   }
-  initReels();
-  bindEvents();
-  makeLog("起動完了。HOMEから設定変更、NEW GAME、CONTINUEが可能。", "highlight");
-  render();
-}
 
-boot();
+  /**
+   * Toggle skip (fast) mode. When enabled, auto spins occur at a much
+   * shorter interval and animations are suppressed.
+   */
+  function toggleSkip() {
+    skipMode = !skipMode;
+    skipBtn.textContent = skipMode ? 'SKIP ON' : 'SKIP';
+  }
+
+  /**
+   * Increment credits by 50. In real machines this would correspond to
+   * inserting money or coins. Here we simply credit the player.
+   */
+  function addCredits() {
+    machine.credits += 50;
+    updateStatusDisplay();
+  }
+
+  // Bind buttons
+  betBtn.addEventListener('click', addCredits);
+  leverBtn.addEventListener('click', () => {
+    if (!autoMode) {
+      performSpin();
+    }
+  });
+  autoBtn.addEventListener('click', toggleAuto);
+  skipBtn.addEventListener('click', toggleSkip);
+
+  /**
+   * Show the main menu. Options are provided via buttons that load
+   * different modal contents.
+   */
+  function openMenu() {
+    modalTitle.textContent = 'Menu';
+    modalBody.innerHTML = '';
+    const list = document.createElement('ul');
+    list.style.listStyle = 'none';
+    list.style.padding = '0';
+    list.style.margin = '0';
+    const items = [
+      { name: 'Change Setting & Options', action: openSettingsModal },
+      { name: 'Statistics', action: openStatisticsModal },
+      { name: 'Save / Load', action: openSaveLoadModal },
+      { name: machine.debug ? 'Disable Debug' : 'Enable Debug', action: toggleDebug },
+      { name: 'Export State', action: exportState },
+      { name: 'Import State', action: importState }
+    ];
+    items.forEach(item => {
+      const li = document.createElement('li');
+      li.style.marginBottom = '0.5rem';
+      const btn = document.createElement('button');
+      btn.textContent = item.name;
+      btn.style.width = '100%';
+      btn.className = 'modal-menu-btn';
+      btn.addEventListener('click', () => {
+        item.action();
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+    modalBody.appendChild(list);
+    showModal();
+  }
+
+  /**
+   * Show settings modal allowing the user to change machine setting, toggle
+   * debug and adjust auto/skip preferences.
+   */
+  function openSettingsModal() {
+    modalTitle.textContent = 'Settings & Options';
+    modalBody.innerHTML = '';
+    // Setting selector
+    const section1 = document.createElement('div');
+    section1.className = 'modal-section';
+    const h3 = document.createElement('h3');
+    h3.textContent = 'Machine Setting';
+    section1.appendChild(h3);
+    const sel = document.createElement('select');
+    MACHINE_CONFIG.settings.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = 'Setting ' + s.id;
+      if (s.id === machine.setting) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    section1.appendChild(sel);
+    // Debug checkbox
+    const debugSection = document.createElement('div');
+    debugSection.className = 'modal-section';
+    const debugLabel = document.createElement('label');
+    debugLabel.innerHTML = '<input type="checkbox" id="debug-toggle"> Debug Mode';
+    debugSection.appendChild(debugLabel);
+    // Auto & skip toggles display only for reference (cannot modify here)
+    const info = document.createElement('p');
+    info.textContent = 'Use the AUTO and SKIP buttons on the main screen to control autoplay and fast mode.';
+    info.style.fontSize = '0.7rem';
+    info.style.color = '#888';
+    section1.appendChild(info);
+    modalBody.appendChild(section1);
+    modalBody.appendChild(debugSection);
+    // Initialise debug toggle
+    const debugToggle = debugLabel.querySelector('#debug-toggle');
+    debugToggle.checked = machine.debug;
+    // Save button
+    const btnSection = document.createElement('div');
+    btnSection.className = 'modal-section';
+    const saveBtn = document.createElement('button');
+    saveBtn.textContent = 'Apply';
+    btnSection.appendChild(saveBtn);
+    modalBody.appendChild(btnSection);
+    saveBtn.addEventListener('click', () => {
+      const selectedSetting = parseInt(sel.value, 10);
+      machine.setSetting(selectedSetting);
+      const debugEnabled = debugToggle.checked;
+      machine.setDebug(debugEnabled);
+      updateDebugVisibility();
+      updateStatusDisplay();
+      hideModal();
+    });
+  }
+
+  /**
+   * Render statistics modal showing aggregated counts and measured hit rates.
+   */
+  function openStatisticsModal() {
+    modalTitle.textContent = 'Statistics';
+    modalBody.innerHTML = '';
+    const stats = machine.stats;
+    const table = document.createElement('table');
+    table.style.width = '100%';
+    table.style.borderCollapse = 'collapse';
+    const rows = [
+      ['Total Spins', stats.totalSpins],
+      ['Total CZ', stats.totalCZ],
+      ['Strong CZ', stats.totalStrongCZ],
+      ['Episode Bonus', stats.totalEpisode],
+      ['AT Entries', stats.totalAT],
+      ['Upper AT Entries', stats.totalATUpper],
+      ['Battles', stats.totalBattles],
+      ['Battle Wins', stats.battleWins],
+      ['Battle Losses', stats.battleLosses],
+      ['Zones', stats.totalZones],
+      ['Judgments', stats.totalJudgments],
+      ['Judgment Success', stats.judgmentSuccess],
+      ['Max Difference', stats.maxDifference]
+    ];
+    rows.forEach(([label, value], idx) => {
+      const tr = document.createElement('tr');
+      const tdLabel = document.createElement('td');
+      tdLabel.textContent = label;
+      tdLabel.style.padding = '0.3rem';
+      tdLabel.style.borderBottom = '1px solid #333';
+      const tdValue = document.createElement('td');
+      tdValue.textContent = value;
+      tdValue.style.padding = '0.3rem';
+      tdValue.style.borderBottom = '1px solid #333';
+      tdValue.style.textAlign = 'right';
+      tr.appendChild(tdLabel);
+      tr.appendChild(tdValue);
+      table.appendChild(tr);
+    });
+    modalBody.appendChild(table);
+    // Reset stats button
+    const resetBtn = document.createElement('button');
+    resetBtn.textContent = 'Reset Statistics';
+    resetBtn.addEventListener('click', () => {
+      if (confirm('Reset all statistics?')) {
+        machine.stats = {
+          totalSpins: 0,
+          totalCZ: 0,
+          totalStrongCZ: 0,
+          totalEpisode: 0,
+          totalAT: 0,
+          totalATUpper: 0,
+          totalBattles: 0,
+          battleWins: 0,
+          battleLosses: 0,
+          totalZones: 0,
+          totalJudgments: 0,
+          judgmentSuccess: 0,
+          maxDifference: 0
+        };
+        updateStatusDisplay();
+        hideModal();
+      }
+    });
+    resetBtn.style.marginTop = '1rem';
+    modalBody.appendChild(resetBtn);
+  }
+
+  /**
+   * Render the save/load modal. Allows saving into three slots and loading
+   * from them. Save data includes full machine state and statistics.
+   */
+  function openSaveLoadModal() {
+    modalTitle.textContent = 'Save / Load';
+    modalBody.innerHTML = '';
+    const container = document.createElement('div');
+    for (let i = 0; i < 3; i++) {
+      const slotIndex = i;
+      const slotKey = 'dg_save_' + slotIndex;
+      const slotData = localStorage.getItem(slotKey);
+      const section = document.createElement('div');
+      section.className = 'modal-section';
+      const title = document.createElement('h3');
+      title.textContent = 'Slot ' + (slotIndex + 1);
+      section.appendChild(title);
+      const info = document.createElement('p');
+      info.style.fontSize = '0.75rem';
+      info.style.color = '#aaa';
+      if (slotData) {
+        try {
+          const obj = JSON.parse(slotData);
+          const date = new Date(obj.timestamp);
+          info.textContent = 'Saved on ' + date.toLocaleString();
+        } catch (e) {
+          info.textContent = 'Corrupt save data';
+        }
+      } else {
+        info.textContent = 'Empty';
+      }
+      section.appendChild(info);
+      const btnSave = document.createElement('button');
+      btnSave.textContent = 'Save';
+      btnSave.addEventListener('click', () => {
+        const data = { timestamp: Date.now(), state: machine.serialize() };
+        localStorage.setItem(slotKey, JSON.stringify(data));
+        hideModal();
+      });
+      const btnLoad = document.createElement('button');
+      btnLoad.textContent = 'Load';
+      btnLoad.disabled = !slotData;
+      btnLoad.addEventListener('click', () => {
+        if (slotData) {
+          try {
+            const obj = JSON.parse(slotData);
+            machine.deserialize(obj.state);
+            updateStatusDisplay();
+            updateDebugVisibility();
+            hideModal();
+          } catch (e) {
+            alert('Failed to load save slot ' + (slotIndex + 1));
+          }
+        }
+      });
+      section.appendChild(btnSave);
+      section.appendChild(btnLoad);
+      container.appendChild(section);
+    }
+    // Export and import
+    const exportBtn = document.createElement('button');
+    exportBtn.textContent = 'Export Current State';
+    exportBtn.style.display = 'block';
+    exportBtn.style.marginTop = '1rem';
+    exportBtn.addEventListener('click', () => {
+      const data = { timestamp: Date.now(), state: machine.serialize() };
+      const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'dark-ghoul-save.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+    const importBtn = document.createElement('button');
+    importBtn.textContent = 'Import State';
+    importBtn.style.display = 'block';
+    importBtn.style.marginTop = '0.5rem';
+    importBtn.addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.json';
+      input.addEventListener('change', () => {
+        const file = input.files[0];
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+          try {
+            const obj = JSON.parse(evt.target.result);
+            machine.deserialize(obj.state);
+            updateStatusDisplay();
+            updateDebugVisibility();
+            hideModal();
+          } catch (err) {
+            alert('Failed to import state');
+          }
+        };
+        reader.readAsText(file);
+      });
+      input.click();
+    });
+    modalBody.appendChild(container);
+    modalBody.appendChild(exportBtn);
+    modalBody.appendChild(importBtn);
+  }
+
+  /**
+   * Toggle debug mode on or off through the menu. Updates persistent flag and
+   * hides or shows debug UI elements.
+   */
+  function toggleDebug() {
+    machine.setDebug(!machine.debug);
+    updateDebugVisibility();
+    hideModal();
+  }
+
+  /**
+   * Export the current machine state as a JSON file. This is also
+   * accessible via the save/load panel.
+   */
+  function exportState() {
+    const data = { timestamp: Date.now(), state: machine.serialize() };
+    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'dark-ghoul-export.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    hideModal();
+  }
+
+  /**
+   * Prompt the user to import a machine state from a JSON file.
+   */
+  function importState() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const obj = JSON.parse(evt.target.result);
+          machine.deserialize(obj.state);
+          updateStatusDisplay();
+          updateDebugVisibility();
+          hideModal();
+        } catch (err) {
+          alert('Failed to import state');
+        }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+
+  /**
+   * Show the modal overlay.
+   */
+  function showModal() {
+    modalOverlay.classList.remove('hidden');
+  }
+  /**
+   * Hide the modal overlay.
+   */
+  function hideModal() {
+    modalOverlay.classList.add('hidden');
+  }
+  modalCloseBtn.addEventListener('click', hideModal);
+  menuBtn.addEventListener('click', openMenu);
+
+  /**
+   * Update the visibility of debug UI elements. Called whenever debug
+   * mode toggles.
+   */
+  function updateDebugVisibility() {
+    const debugEls = document.querySelectorAll('.debug-only');
+    debugEls.forEach(el => {
+      el.style.display = machine.debug ? '' : 'none';
+    });
+    // Clear logs if disabling debug
+    if (!machine.debug) {
+      machine.logLines = [];
+      logPanel.innerHTML = '';
+    }
+    updateStatusDisplay();
+  }
+
+  // Initial UI state
+  updateStatusDisplay();
+  updateDebugVisibility();
+  // Load an initial background video for the starting state
+  updateBackgroundVideo();
+})();
