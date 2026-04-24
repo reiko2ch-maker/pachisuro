@@ -1,342 +1,297 @@
 /*
- * Stylesheet for Dark Ghoul AT simulator
+ * Global styles for Dark Ghoul AT simulator
  *
- * This file defines a dark, high‑contrast palette suitable for a smartphone in
- * portrait orientation. The layout is composed of three vertical sections:
- * 1. The top bar displays the machine name, credits, difference and various
- *    counters. Debug information only appears when the debug mode is enabled.
- * 2. The main display contains the LCD/video area, the simple reel display
- *    and an optional log panel for debugging. Videos are layered so that
- *    background loops, cut‑ins and LCD animations can play independently.
- * 3. The bottom control panel houses the bet lever, stop buttons and
- *    auxiliary controls such as AUTO and SKIP.
+ * The layout is designed for mobile portrait mode. The top bar shows status and
+ * quick actions. The LCD container hosts a canvas used to render a dynamic
+ * glitch effect. Message and star overlays float above the canvas to show
+ * Japanese-style notifications and expectation ratings. The reel container
+ * displays simplified slot reels, and the control panel hosts the main
+ * interaction buttons. Modals are hidden by default and can be opened via
+ * JavaScript.
  */
+
+:root {
+  --bg-color: #0a0a0f;
+  --accent-red: #a00;
+  --accent-orange: #c60;
+  --accent-purple: #6035a3;
+  --accent-green: #3a864f;
+  --text-light: #e0e0e0;
+  --text-dark: #181818;
+  --modal-bg: rgba(0, 0, 0, 0.85);
+  --button-bg: #222;
+  --button-bg-hover: #444;
+  --button-fg: #ddd;
+  --button-radius: 4px;
+}
 
 html, body {
   margin: 0;
   padding: 0;
-  height: 100%;
   width: 100%;
+  height: 100%;
+  font-family: 'Arial', sans-serif;
+  color: var(--text-light);
+  background-color: var(--bg-color);
   overflow: hidden;
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-  background-color: #0a0a0f;
-  color: #f2f2f2;
 }
 
 /* Top bar */
 #top-bar {
   display: flex;
-  flex-direction: row;
-  align-items: center;
   justify-content: space-between;
-  padding: 0.5rem;
-  background-color: #12121a;
-  border-bottom: 1px solid #333;
-}
-
-#top-bar .left-group {
-  display: flex;
   align-items: center;
-  gap: 0.5rem;
+  padding: 4px 8px;
+  background-color: #111;
+  color: var(--text-light);
+  font-size: 12px;
+  border-bottom: 1px solid #222;
 }
-
-#top-bar #machine-name {
-  font-weight: bold;
-  font-size: 1rem;
+#top-bar .top-center span {
+  margin-right: 8px;
 }
-
-#top-bar #menu-btn {
-  background: none;
+#top-bar button.small {
+  margin-left: 4px;
+  padding: 2px 4px;
+  font-size: 10px;
+  background-color: var(--button-bg);
+  color: var(--button-fg);
   border: none;
-  color: #f2f2f2;
-  font-size: 1.5rem;
+  border-radius: var(--button-radius);
   cursor: pointer;
 }
-
-#status-panel {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-  font-size: 0.8rem;
+#top-bar button.small:hover {
+  background-color: var(--button-bg-hover);
 }
 
-.status-item {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1;
-}
-
-.status-item label {
-  font-size: 0.65rem;
-  color: #888;
-  margin-bottom: 0.1rem;
-}
-
-.status-item span {
-  font-size: 0.85rem;
-  font-weight: bold;
-}
-
-/* Main display */
-#main-display {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 0.5rem 0.5rem;
-  overflow-y: auto;
-}
-
-/* LCD/Video container */
+/* LCD container */
 #lcd-container {
   position: relative;
   width: 100%;
   height: 40vh;
-  max-height: 50vh;
-  background-color: #0f0f18;
-  border: 1px solid #222;
-  border-radius: 4px;
+  background-color: #000;
   overflow: hidden;
-  /*
-   * Enable 3D context for CSS transforms. This allows the screen‑shake
-   * animation (defined below) to translate the container without
-   * flattening its contents. The perspective value controls the
-   * intensity of 3D effects; increase it for subtler shaking.
-   */
-  perspective: 1000px;
-  transform-style: preserve-3d;
 }
-
-/*
- * Screen shake animation used during strong or special cut‑ins. When the
- * `.shake` class is applied to the LCD container, this keyframe
- * sequence produces a brief jitter. The values are kept small to
- * avoid triggering motion sickness on mobile devices.
- */
-@keyframes screen-shake {
-  0% { transform: translate(0, 0); }
-  20% { transform: translate(-4px, 2px); }
-  40% { transform: translate(3px, -3px); }
-  60% { transform: translate(-2px, 4px); }
-  80% { transform: translate(2px, -2px); }
-  100% { transform: translate(0, 0); }
-}
-
-/* Class toggled by JavaScript to trigger the shake animation */
-.shake {
-  animation: screen-shake 0.4s ease-in-out;
-}
-
-.video-layer {
+#glitch-canvas {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  pointer-events: none;
-  background: black;
 }
-
-.hidden {
-  display: none !important;
+#message-overlay {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-size: 24px;
+  font-weight: bold;
+  text-shadow: 0 0 8px var(--accent-red), 0 0 16px var(--accent-red);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease-in-out;
+}
+#message-overlay.show {
+  opacity: 1;
+}
+#star-overlay {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.3s ease-in-out;
+}
+#star-overlay.show {
+  opacity: 1;
+}
+#star-overlay .star {
+  font-size: 20px;
+  color: var(--accent-orange);
+  text-shadow: 0 0 4px var(--accent-orange), 0 0 8px var(--accent-orange);
 }
 
 /* Reel container */
 #reel-container {
   display: flex;
-  flex-direction: row;
-  justify-content: space-around;
+  justify-content: space-evenly;
   align-items: center;
-  width: 100%;
-  margin-top: 1rem;
-  padding: 0 0.5rem;
+  margin-top: 8px;
+  height: 18vh;
+  font-size: 24px;
+  color: #ccc;
 }
-
 .reel {
-  flex: 1;
-  max-width: 30%;
-  height: 6rem;
-  margin: 0 0.2rem;
-  border: 2px solid #333;
-  border-radius: 4px;
-  background-color: #1a1a24;
+  width: 30%;
+  height: 100%;
   display: flex;
-  align-items: center;
   justify-content: center;
-  overflow: hidden;
-  position: relative;
-}
-
-.reel .symbol {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #d9455f;
-  animation: fade-in 0.2s ease-in-out;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; transform: translateY(-0.5rem); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Log panel for debugging */
-#log-panel {
-  width: 100%;
-  max-height: 8rem;
-  overflow-y: auto;
-  padding: 0.25rem;
-  margin-top: 0.5rem;
-  background-color: #0d0d14;
+  align-items: center;
   border: 1px solid #333;
   border-radius: 4px;
-  font-size: 0.65rem;
-  line-height: 1.2;
+  background: #050505;
+  box-shadow: inset 0 0 4px #000;
 }
-
-#log-panel div {
-  margin-bottom: 0.1rem;
+#last-role {
+  position: absolute;
+  bottom: 4px;
+  right: 8px;
+  font-size: 12px;
+  color: var(--accent-purple);
 }
 
 /* Control panel */
 #control-panel {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+  background-color: #111;
   display: flex;
-  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: space-around;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.25rem;
-  background-color: #12121a;
-  border-top: 1px solid #333;
+  border-top: 1px solid #222;
 }
-
-.btn.control {
-  flex: 1;
-  margin: 0 0.15rem;
-  padding: 0.5rem 0;
-  font-size: 0.75rem;
-  font-weight: bold;
+#control-panel button {
+  padding: 6px 8px;
+  margin: 2px;
+  flex: 1 0 calc(25% - 8px);
+  background-color: var(--button-bg);
+  color: var(--button-fg);
   border: none;
-  border-radius: 4px;
-  background-color: #28283d;
-  color: #f2f2f2;
+  border-radius: var(--button-radius);
+  font-size: 14px;
   cursor: pointer;
-  transition: background-color 0.1s ease;
+  min-width: 60px;
+}
+#control-panel button:hover {
+  background-color: var(--button-bg-hover);
+}
+#control-panel button.toggle.active {
+  background-color: var(--accent-red);
+  color: #fff;
+}
+#control-panel .stop-buttons {
+  display: flex;
+  flex: 1 0 calc(35% - 8px);
+  justify-content: space-between;
+}
+#control-panel .stop-buttons button {
+  flex: 1;
+  margin: 0 2px;
 }
 
-.btn.control:active {
-  background-color: #3a3a55;
+/* Hidden class */
+.hidden {
+  display: none !important;
 }
 
-.btn.control:disabled {
-  background-color: #2a2a40;
-  color: #666;
-  cursor: not-allowed;
-}
-
-/* Modal overlay */
+/* Modals */
 #modal-overlay {
   position: fixed;
   top: 0;
   left: 0;
-  width: 100vw;
-  height: 100vh;
-  background-color: rgba(0,0,0,0.85);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background-color: var(--modal-bg);
   z-index: 100;
+  display: none;
 }
-
-#modal-content {
-  background-color: #1a1a24;
+/* Base modal styling */
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90%;
+  max-width: 320px;
+  background-color: #111;
   border: 1px solid #333;
   border-radius: 6px;
-  width: 90vw;
-  max-width: 480px;
-  max-height: 90vh;
-  display: flex;
-  flex-direction: column;
+  box-shadow: 0 0 10px #000;
+  z-index: 101;
+  color: var(--text-light);
 }
-
-#modal-header {
+.modal-header {
+  padding: 8px;
+  background-color: #1b1b1b;
+  border-bottom: 1px solid #333;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.75rem;
-  border-bottom: 1px solid #333;
+  font-size: 16px;
 }
-
-#modal-header h2 {
-  margin: 0;
-  font-size: 1.1rem;
-}
-
-#modal-close-btn {
+.modal-header .close {
   background: none;
   border: none;
-  color: #f2f2f2;
-  font-size: 1.25rem;
+  color: var(--accent-red);
+  font-size: 20px;
   cursor: pointer;
 }
-
-#modal-body {
-  padding: 0.75rem;
-  overflow-y: auto;
-  flex: 1;
-  font-size: 0.8rem;
+.modal-body {
+  padding: 8px;
+  font-size: 14px;
 }
 
-/* Basic form styles in modal */
-.modal-section {
-  margin-bottom: 1rem;
-}
-
-.modal-section h3 {
-  margin-top: 0;
-  margin-bottom: 0.25rem;
-  font-size: 0.95rem;
-}
-
-.modal-section label {
-  display: block;
-  margin-bottom: 0.25rem;
-  font-size: 0.75rem;
-  color: #aaa;
-}
-
-.modal-section select,
-.modal-section input[type="number"],
-.modal-section input[type="text"],
-.modal-section textarea {
-  width: 100%;
-  padding: 0.35rem;
-  margin-bottom: 0.5rem;
-  border: 1px solid #333;
-  border-radius: 3px;
-  background-color: #2a2a40;
-  color: #eee;
-  font-size: 0.8rem;
-}
-
-.modal-section button {
-  padding: 0.4rem 0.6rem;
-  font-size: 0.75rem;
-  border: none;
+/* Save slot styling */
+.save-slot {
+  background-color: #222;
+  border: 1px solid #444;
   border-radius: 4px;
-  background-color: #3a3a55;
-  color: #f2f2f2;
+  margin: 4px 0;
+  padding: 6px;
   cursor: pointer;
-  transition: background-color 0.1s ease;
+  font-size: 14px;
+}
+.save-slot:hover {
+  background-color: #333;
+}
+.modal-footer {
+  padding: 6px;
+  text-align: right;
+  border-top: 1px solid #333;
+}
+.modal-footer button {
+  padding: 4px 8px;
+  background-color: var(--button-bg);
+  color: var(--button-fg);
+  border: none;
+  border-radius: var(--button-radius);
+  cursor: pointer;
 }
 
-.modal-section button:active {
-  background-color: #47476a;
-}
-
-/* Hide elements with debug-only class until debug enabled */
+/* Debug-specific styling */
 .debug-only {
   display: none;
+  color: var(--accent-green);
+  font-size: 12px;
 }
+.debug-mode .debug-only {
+  display: inline;
+}
+
+/* Screen shake animation */
+@keyframes shake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-2px, 1px); }
+  40% { transform: translate(3px, -2px); }
+  60% { transform: translate(-1px, 2px); }
+  80% { transform: translate(2px, -1px); }
+  100% { transform: translate(0, 0); }
+}
+.shake {
+  animation: shake 0.5s linear infinite;
+}
+
+/* Star rating colors by level */
+#star-overlay[data-level="1"] .star { color: #555; }
+#star-overlay[data-level="2"] .star { color: var(--accent-purple); }
+#star-overlay[data-level="3"] .star { color: var(--accent-orange); }
+#star-overlay[data-level="4"] .star { color: var(--accent-red); }
+#star-overlay[data-level="5"] .star { color: #fff; }

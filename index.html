@@ -1,76 +1,96 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Dark Ghoul AT Simulator</title>
-  <link rel="stylesheet" href="style.css">
+  <!-- Main stylesheet -->
+  <link rel="stylesheet" href="style.css" />
+  <script src="machine-config.js"></script>
 </head>
 <body>
-  <!-- Top bar: displays basic status and access to the menu -->
-  <header id="top-bar">
-    <div class="left-group">
-      <button id="menu-btn" aria-label="Menu">☰</button>
-      <span id="machine-name">Dark Ghoul AT</span>
+  <!-- Top bar for status and quick actions -->
+  <div id="top-bar">
+    <div class="top-left">
+      <span id="machine-name"></span>
     </div>
-    <div id="status-panel">
-      <div class="status-item"><label>Credits</label><span id="credits">0</span></div>
-      <div class="status-item"><label>Difference</label><span id="difference">0</span></div>
-      <div class="status-item"><label>Game</label><span id="game-count">0</span></div>
-      <div class="status-item debug-only"><label>State</label><span id="debug-state">-</span></div>
-      <div class="status-item debug-only"><label>Mode</label><span id="debug-mode">-</span></div>
+    <div class="top-center">
+      <span>クレジット: <span id="credits">50</span></span>
+      <span>BET: <span id="bet">1</span></span>
+      <span>差枚: <span id="diff">0</span></span>
+      <span id="internal-mode" class="debug-only"></span>
     </div>
-  </header>
-
-  <!-- Main display area: shows reels and LCD video/graphics -->
-  <main id="main-display">
-    <div id="lcd-container">
-      <!-- background layer for looping videos or CSS animations -->
-      <video id="background-video" class="video-layer" autoplay loop muted playsinline></video>
-      <!-- cut-in layer for short bursts of video -- can overlay background -->
-      <video id="cutin-video" class="video-layer hidden" muted playsinline></video>
-      <!-- lcd layer for smaller video animations or CSS effects -->
-      <video id="lcd-video" class="video-layer hidden" muted playsinline></video>
-    </div>
-    <div id="reel-container">
-      <div class="reel" id="reel1">
-        <div class="symbol">-</div>
-      </div>
-      <div class="reel" id="reel2">
-        <div class="symbol">-</div>
-      </div>
-      <div class="reel" id="reel3">
-        <div class="symbol">-</div>
-      </div>
-    </div>
-    <div id="log-panel" class="debug-only"></div>
-  </main>
-
-  <!-- Control panel: bet, lever, stops, auto, skip -->
-  <footer id="control-panel">
-    <button id="bet-btn" class="btn control">BET</button>
-    <button id="lever-btn" class="btn control">LEVER</button>
-    <button id="stop1-btn" class="btn control">1</button>
-    <button id="stop2-btn" class="btn control">2</button>
-    <button id="stop3-btn" class="btn control">3</button>
-    <button id="auto-btn" class="btn control">AUTO</button>
-    <button id="skip-btn" class="btn control">SKIP</button>
-  </footer>
-
-  <!-- Modal overlay: contains various panels (settings, stats, save/load, etc.) -->
-  <div id="modal-overlay" class="hidden">
-    <div id="modal-content">
-      <header id="modal-header">
-        <h2 id="modal-title">Menu</h2>
-        <button id="modal-close-btn" aria-label="Close">✕</button>
-      </header>
-      <div id="modal-body">
-        <!-- Content dynamically injected by app.js -->
-      </div>
+    <div class="top-right">
+      <button id="btn-settings" class="small">設定</button>
+      <button id="btn-save" class="small">保存</button>
+      <button id="btn-load" class="small">読込</button>
+      <button id="btn-stats" class="small">統計</button>
+      <button id="btn-debug" class="small">DB</button>
     </div>
   </div>
 
-  <script src="machine-config.js"></script>
+  <!-- LCD container with glitch canvas and overlays -->
+  <div id="lcd-container">
+    <canvas id="glitch-canvas"></canvas>
+    <div id="message-overlay" class="hidden"></div>
+    <div id="star-overlay" class="hidden"></div>
+  </div>
+
+  <!-- Reel placeholder (simple representation) -->
+  <div id="reel-container">
+    <div class="reel" id="reel1">—</div>
+    <div class="reel" id="reel2">—</div>
+    <div class="reel" id="reel3">—</div>
+    <div id="last-role"></div>
+  </div>
+
+  <!-- Control panel -->
+  <div id="control-panel">
+    <button id="btn-bet">BET</button>
+    <button id="btn-lever">レバー</button>
+    <div class="stop-buttons">
+      <button id="btn-stop1" disabled>①</button>
+      <button id="btn-stop2" disabled>②</button>
+      <button id="btn-stop3" disabled>③</button>
+    </div>
+    <button id="btn-auto" class="toggle">AUTO</button>
+    <button id="btn-skip" class="toggle">SKIP</button>
+    <button id="btn-menu">MENU</button>
+  </div>
+
+  <!-- Modal overlay container -->
+  <div id="modal-overlay" class="hidden"></div>
+  <div id="modals">
+    <!-- Settings modal -->
+    <div class="modal hidden" id="modal-settings" data-modal="settings">
+      <div class="modal-header">設定変更<button class="close">×</button></div>
+      <div class="modal-body">
+        <label>設定: <select id="select-setting"></select></label><br />
+        <label><input type="checkbox" id="toggle-sound" checked /> 効果音有効</label><br />
+        <label><input type="checkbox" id="toggle-debug" /> デバッグ表示</label><br />
+      </div>
+      <div class="modal-footer"><button class="close">閉じる</button></div>
+    </div>
+    <!-- Save/Load modal -->
+    <div class="modal hidden" id="modal-save" data-modal="save">
+      <div class="modal-header">保存/読込<button class="close">×</button></div>
+      <div class="modal-body">
+        <div class="save-slots"></div>
+        <p>スロットをタップして保存または読込を選択します。</p>
+      </div>
+      <div class="modal-footer"><button class="close">閉じる</button></div>
+    </div>
+    <!-- Stats modal -->
+    <div class="modal hidden" id="modal-stats" data-modal="stats">
+      <div class="modal-header">統計情報<button class="close">×</button></div>
+      <div class="modal-body">
+        <div id="stats-content"></div>
+      </div>
+      <div class="modal-footer"><button class="close">閉じる</button></div>
+    </div>
+  </div>
+
+  <!-- Main script -->
   <script src="app.js"></script>
 </body>
 </html>
